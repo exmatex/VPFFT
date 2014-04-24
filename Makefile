@@ -23,7 +23,11 @@ EXEC   = VPFFT++
 #----------------------------------------------------
 PROJ_PATH = ./Src
 
-PROJ_CPPS   = main.cpp LinearAlgebra.cpp Solvers.cpp MaterialGrid.cpp UnitTester.cpp  Debug.cpp
+PROJ_CPPS   =  main.cpp LinearAlgebra.cpp Solvers.cpp MaterialGrid.cpp UnitTester.cpp  Debug.cpp Config.cpp Parser.cpp
+
+
+
+#main.cpp LinearAlgebra.cpp Solvers.cpp MaterialGrid.cpp UnitTester.cpp  Debug.cpp
 
 CPPS =  $(patsubst %.cpp, $(PROJ_PATH)/%.cpp, $(PROJ_CPPS) )
 
@@ -40,7 +44,7 @@ OBJS_DEBUG =  $(patsubst %.cpp, %.do, $(CPPS))
 #  Specifying precomile external library locations
 #
 #----------------------------------------------------
-INCL = -I. -I${EIGEN_PATH}
+INCL = -I. -I${EIGEN_PATH} -I/opt/local/include/
 
 #----------------------------------------------------
 #
@@ -61,8 +65,8 @@ DEBUG_FLAGS    =  -fopenmp  -ggdb -DDEBUG_LEVEL_MAX \
 RELEASE_FLAGS +=  ${LIB_ROOT}
 DEBUG_FLAGS   +=  ${LIB_ROOT}	
 
-LIBS   =  -lm -lfftw3_threads -lfftw3 -lpthread
-CC     = /opt/local/bin/g++-mp-4.5   # g++ #icpc
+LIBS   =  -lm -lfftw3_threads -lfftw3 -lfftw3_mpi -lpthread
+CC     = mpic++ # /opt/local/bin/g++-mp-4.5   # g++ #icpc
 
 
 

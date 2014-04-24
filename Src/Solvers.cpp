@@ -130,6 +130,14 @@ namespace VPFFT
       Float RelativeError = 1e5;
       EigenRep SavedState = InitialStressState; 
 
+
+      //-------------------
+      // DEBUG
+//       std::cout << "MacroscopicStrainRate " << MacroscopicStrainRate << std::endl;
+//       std::cout << "LagrangeMultiplier " << LagrangeMultiplier << std::endl;
+//       std::cout << "Local d-dot " << LocalDisplacementVariation << std::endl;
+//       std::cout << "Local L \n " << HomogeonousReference << std::endl;
+      //-------------------
       while( RemainingIterations > 0 )
       {
         EigenRep LoopStartStressState = CurrentStressState;

@@ -9,9 +9,9 @@
 #include "UnitTester.h"
 
 
-int main()
+int main( int argc, char ** argv)
 {
-
-  VPFFT::UnitTester::BasicTestMain();
+  
+  VPFFT::UnitTester::MPI_VPFFT_Test( argc, argv );
   return 0;
 }

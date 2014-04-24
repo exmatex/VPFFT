@@ -111,6 +111,7 @@ namespace VPFFT
         ::FCC_CrystalTest
         ::FCC_SchmidtBasis & FCC_Schmidt = VPFFT::FCC_CrystalTest::FCC_SchmidtBasis::Get();
 
+      std::cout << "[DEBUG] LocalSchmidtTensor.size() " << LocalSchmidtTensor.size() << std::endl;
       for( int i = 0; i < LocalSchmidtTensor.size(); i ++ )
       {        
         SMatrix3x3 OrientationTranspose = OrientationField[i];
@@ -150,6 +151,8 @@ namespace VPFFT
     //--------------------------------------------------------------------------------
     void MaterialGrid::InitializeComputation( const EigenRep & MacroscopicStrainRate )
     {
+      std::cout << "[DEBUG] Initialize Computation " << DimXLocal << " " << DimY << " " << DimZ <<  std::endl;
+
       //----------------------
       //  TO DEBUG - must be unified
       const Float NewtonIterationEpsilon = 5e-4;
@@ -161,7 +164,7 @@ namespace VPFFT
 
       ImposedMaxResolvedStress = std::max( static_cast<Float>(2.0), ImposedMaxResolvedStress );
       
-      for( int i = 0; i < DimX; i ++ )
+      for( int i = 0; i < DimXLocal; i ++ )
       {
         for( int j = 0; j < DimY; j ++ )
         {
@@ -214,6 +217,7 @@ namespace VPFFT
     //--------------------------------------------------------------------------------
     SMatrix5x5 MaterialGrid::BuildLinearRefMediumStiffness(   )
     {
+      std::cout << "Build Linear Ref Medium Stiffness " << std::endl;
       SMatrix5x5 M;         // Linear Modouli
             
       M.SetZero();
@@ -243,6 +247,34 @@ namespace VPFFT
         M_Mapped = M_Mapped.inverse();
         M.MovingAverage( M_Local, i );
       }
+
+      // ----------------- reduce and scatter M ------------------------
+      //
+      int NumProc;
+      MPI_Comm_size( MPI_COMM_WORLD, & NumProc );
+      
+      for( int i = 0; i < 5; i ++ )
+      {
+        for( int j = 0; j < 5; j ++ )
+        {
+          Float WeightedSum = 0;
+          Float Tmp = M(i, j) * static_cast<Float>( DimXLocal );
+          MPI_Allreduce(  & Tmp,
+                          & WeightedSum,
+                          1,
+                          VPFFT_MPI_FLOAT_TYPE,
+                          MPI_SUM,
+                          MPI_COMM_WORLD );
+          M( i, j ) = WeightedSum / static_cast<Float>( DimX );
+        }
+      }
+
+      //------------------   DEBUG -----------------
+      int Rank;
+      MPI_Comm_rank( MPI_COMM_WORLD, & Rank );
+      if( Rank == 0 )
+        std::cout << M << std::endl;
+      
       
       M.NormalizeValues();      
       return M;
@@ -263,8 +295,11 @@ namespace VPFFT
           fftw_free( _DisplacementVariation[i] );          
           fftw_free( _PolarizationField[i] );
         }
+        
+        delete [] OrientationField;
+        delete [] StressField;
       }
-      fftw_cleanup_threads();
+      //      fftw_cleanup_threads();
       // fftw_cleanup();
     }
     
@@ -275,11 +310,8 @@ namespace VPFFT
     //--------------------------------------------------------------------------------
     void MaterialGrid::InitializeMemory( int DimX_, int DimY_, int DimZ_ ) 
     {
-      //-------------------------------------------------------
-      //  FFTW OpenMP initialization
-      //-------------------------------------------------------
-      fftw_init_threads( );
-      fftw_plan_with_nthreads( 8 );
+
+      fftw_mpi_init();
       //-------------------------------------------------------
       //
       //               D E B U G
@@ -289,20 +321,7 @@ namespace VPFFT
       GammaDotBase    = std::vector<Float>(FCC_CrystalTest::NumSystems, 15.5);   // was 1 when debuggin
       RateSensitivity = std::vector<int>(FCC_CrystalTest::NumSystems, 10);
       //-------------------------------------------------------
-
-      DimYZ = DimY * DimZ;
       
-      int NumElements = DimX * DimY * DimZ;
-
-      OrientationField.resize       ( NumElements );
-      StressField.resize            ( NumElements );
-      StrainRateField.resize        ( NumElements );
-      LagrangeMultiplierField.resize( NumElements );
-      LocalSchmidtTensor.resize     ( NumElements );
-      LocalCRSS.resize              ( NumElements );
-      AccumulatedShear.resize       ( NumElements );
-
-
       using FCC_CrystalTest::FCC_SchmidtBasis;
       //-------------------------------------------------------
       //   Hardening parameters, DEBUG values, even for hardening matrix
@@ -316,41 +335,249 @@ namespace VPFFT
         HardeningMatrix[i].resize( FCC_SchmidtBasis::NumSlipSystems(), 1.0 );
       //-------------------------------------------------------
       
-   
-      for( int i = 0; i < NumElements; i ++ )
+      DimYZ = DimY * DimZ;
+      
+      std::cout << DimX << " " << DimY << " " << DimZ << std::endl;
+      ptrdiff_t LocalAllocSize;
+      // get local data size and allocate
+      LocalAllocSize = fftw_mpi_local_size_3d(  DimX, DimY, DimZ, MPI_COMM_WORLD,
+                                                &DimXLocal, &DimXLocalStart );
+
+      std::cout << "get local data size " << std::endl;
+      for( int i = 0; i < 5; i ++ )
+      {
+        std::cout << i << std::endl;
+        _DisplacementVariation[i]
+          //          = static_cast<FFTW_ComplexPtr>( fftw_malloc( sizeof(FFTW_Complex) * LocalAllocSize ) );
+          = fftw_alloc_complex(  LocalAllocSize );
+        
+        
+        _DisplacementBackwardPlan[i]  = fftw_mpi_plan_dft_3d( DimX, DimY, DimZ,
+                                                              _DisplacementVariation[i],
+                                                              _DisplacementVariation[i],
+                                                              MPI_COMM_WORLD,
+                                                              FFTW_BACKWARD,
+                                                              FFTW_MEASURE | FFTW_DESTROY_INPUT );
+        _PolarizationField[i]
+          //          = static_cast<FFTW_ComplexPtr>( fftw_malloc( sizeof(FFTW_Complex) * LocalAllocSize ) );
+          =  fftw_alloc_complex( LocalAllocSize );
+
+
+        bzero( _DisplacementVariation[i], sizeof( FFTW_Complex ) * LocalAllocSize );
+        bzero( _PolarizationField[i],     sizeof( FFTW_Complex ) * LocalAllocSize );
+        
+        _PolarizationFieldForwardPlan[i]  = fftw_mpi_plan_dft_3d( DimX, DimY, DimZ,
+                                                                  _PolarizationField[i],
+                                                                  _PolarizationField[i],
+                                                                  MPI_COMM_WORLD,
+                                                                  FFTW_FORWARD,
+                                                                  FFTW_MEASURE | FFTW_DESTROY_INPUT  );
+      }
+      std::cout << "LocalSchidtTensorSize " << LocalSchmidtTensor.size() << std::endl;
+
+      
+      OrientationField = new SMatrix3x3[ DimXLocal * DimYZ ];
+      StressField      = new EigenRep  [ DimXLocal * DimYZ ];
+      LagrangeMultiplierField.resize( DimXLocal * DimYZ );
+      LocalSchmidtTensor.resize     ( DimXLocal * DimYZ);
+      LocalCRSS.resize              ( DimXLocal * DimYZ );
+      AccumulatedShear.resize       ( DimXLocal * DimYZ );
+
+      for( int i = 0; i < LocalSchmidtTensor.size(); i ++ )
       {
         LocalSchmidtTensor[i].resize( FCC_SchmidtBasis::NumSlipSystems() );
         LocalCRSS[i] = vector<Float>( FCC_SchmidtBasis::NumSlipSystems(), 11 ); // hard coded
       }
-      
-      for( int i = 0; i < 5; i ++ )
-      {
-        _DisplacementVariation[i]
-          = static_cast<FFTW_ComplexPtr>( fftw_malloc( sizeof(FFTW_Complex) * NumElements ) );
-        
-        
-        _DisplacementBackwardPlan[i]  = fftw_plan_dft_3d( DimX, DimY, DimZ,
-                                                          _DisplacementVariation[i],
-                                                          _DisplacementVariation[i],
-                                                          FFTW_BACKWARD,
-                                                          FFTW_MEASURE | FFTW_DESTROY_INPUT );
-        _PolarizationField[i]
-          = static_cast<FFTW_ComplexPtr>( fftw_malloc( sizeof(FFTW_Complex) * NumElements ) );
-
-        
-        bzero( _PolarizationField[i], sizeof( FFTW_Complex ) * NumElements );
-
-
-        _PolarizationFieldForwardPlan[i]  = fftw_plan_dft_3d( DimX, DimY, DimZ,
-                                                              _PolarizationField[i],
-                                                              _PolarizationField[i],
-                                                              FFTW_FORWARD,
-                                                              FFTW_MEASURE | FFTW_DESTROY_INPUT  );
-      }
-      
+     
       bInitialized = true;
     }
- 
+
+    //-----------------------------------
+    //  InitializeData
+    //      Input data into MaterialGrid 
+    //
+    //-----------------------------------
+    void MaterialGrid::InitializeData( SMatrix3x3 * Orientations,
+                                       EigenRep  * Stress  )
+    {
+      
+//       int Rank;
+//       MPI_Comm_rank( MPI_COMM_WORLD, & Rank );
+
+//       if( Rank == 0 )
+//       {
+//         SendData( Orientations, Stress );  // this is undetermined.
+//       }
+//       else
+//       {
+//         RecvData();
+//       }
+//       UpdateSchmidtTensors();
+//       std::cout << "Finished initialize data " << std::endl;
+    }
+
+    //--------------------------------------------------------------------------------
+    // ParallelInitialize
+    //   Distribute the initial values as specified by Orientations and Stress
+    //   to all of the N processors.
+    //--------------------------------------------------------------------------------
+    void MaterialGrid::SendData( SMatrix3x3 * Orientations,
+                                 EigenRep  * Stress )
+    {
+      RUNTIME_ASSERT( Orientations != NULL, "Orientation array not initialized");
+      RUNTIME_ASSERT( Stress != NULL,       "Stress array not initialized");
+
+      int Rank, NumProc;
+      MPI_Comm_rank( MPI_COMM_WORLD, & Rank );
+      MPI_Comm_size( MPI_COMM_WORLD, & NumProc );
+
+      ptrdiff_t tmp1, tmp2;
+      fftw_mpi_local_size_3d(  DimX, DimY, DimZ, MPI_COMM_WORLD,
+                               &tmp1, &tmp2 );
+
+      RUNTIME_ASSERT( Rank == 0, "DistributeData is not expected to be called from clients (Rank != 0 )\n");
+      RUNTIME_ASSERT( DimXLocal      == tmp1, "!!-------- DimXLocal size changed --------!! \n" );
+      RUNTIME_ASSERT( DimXLocalStart == tmp2, "!!-------- DimXLocal size changed --------!! \n" );
+
+      //----------  Initialize self ---------- ---------------------------------------//
+      //
+      std::cout << " Rank 0, start: " << DimXLocalStart
+                <<  " size: " << DimXLocal <<std::endl;
+      memcpy( static_cast< void* >(   OrientationField ),
+              static_cast< void* >( & Orientations[DimXLocalStart] ),
+              sizeof( SMatrix3x3 ) * DimXLocal * DimYZ );
+
+      memcpy( static_cast< void* >(   StressField ),
+              static_cast< void* >( & Stress[DimXLocalStart] ),
+              sizeof( EigenRep ) * DimXLocal * DimYZ );
+
+      //-------------  DEBUG
+      std::cout << "------------" << std::endl;
+      std::cout << OrientationField[ DimXLocal * DimYZ - 1 ] << std::endl;
+      std::cout << "------------" << std::endl;
+      std::cout << "------------" << std::endl;
+      std::cout << StressField[ DimXLocal * DimYZ - 1 ] << std::endl;
+      std::cout << "------------" << std::endl;
+      //-------------  END DEBUG
+      
+      std::queue<MPI_Request *> RequestQueue;
+
+      std::vector< ptrdiff_t > DimXStartList, DimXList;
+
+      DimXStartList.resize( NumProc );
+      DimXList.resize     ( NumProc );
+      
+      DimXList[0]      = DimXLocal;
+      DimXStartList[0] = DimXLocalStart;
+
+      //----------  recive all size information ---------------------------------------//
+      //  recieve all size information
+      //  - initialization, so blocking send really doesn't matter
+      for( int RecvRank = 1; RecvRank < NumProc; RecvRank ++ )
+      {
+        MPI_Status status;
+        MPI_Recv( static_cast<void *>( & DimXStartList[ RecvRank ] ),
+                  sizeof( ptrdiff_t ), MPI_BYTE, RecvRank, VPFFT_MPI_TAG,
+                  MPI_COMM_WORLD, & status );
+        MPI_Recv( static_cast<void *>( & DimXList[ RecvRank ] ),
+                  sizeof( ptrdiff_t ), MPI_BYTE, RecvRank, VPFFT_MPI_TAG,
+                  MPI_COMM_WORLD, & status );
+
+        std::cout << "Recv'd " << DimXStartList[RecvRank] << " " << DimXList[RecvRank] << std::endl;
+        // probably need error checking
+      }
+
+      //----------  send orientation ---------------------------------------//
+      //                                                                    //
+      for( int SendRank = 1; SendRank < NumProc; SendRank ++ )
+      {
+        MPI_Request * Request = new MPI_Request;
+        RequestQueue.push( Request );
+
+        // Get chunk of local region.
+        void * buf = static_cast<void*>( &( Orientations[ ToIndex( DimXStartList[SendRank], 0, 0 ) ] ) );
+        
+        MPI_Isend( buf, sizeof( SMatrix3x3 ) * DimXList[SendRank] * DimYZ,
+                   MPI_BYTE, SendRank, VPFFT_MPI_TAG,
+                   MPI_COMM_WORLD, Request );
+      }
+      
+      while( ! RequestQueue.empty() )    // wait till everything is recv'd on all clients
+      {
+        MPI_Status status;
+        MPI_Wait( RequestQueue.front(), &status );    
+        delete RequestQueue.front();
+        RequestQueue.pop();
+
+        // -- could use some error handling here
+      }
+      
+      //----------  send stress --------------------------------------------//
+      //                                                                    //
+      for( int SendRank = 1; SendRank < NumProc; SendRank ++ )
+      {
+        MPI_Request * Request = new MPI_Request;
+        RequestQueue.push( Request );
+
+        // Get chunk of local region.
+        void * buf = static_cast<void*>( &( Stress[ ToIndex( DimXStartList[SendRank], 0, 0 ) ] ) );
+        
+        MPI_Isend( buf, sizeof( EigenRep ) * DimXList[SendRank] * DimYZ,
+                   MPI_BYTE, SendRank, VPFFT_MPI_TAG,
+                   MPI_COMM_WORLD, Request );
+      }
+      
+      while( ! RequestQueue.empty() )    // wait till everything is recv'd on all clients
+      {
+        MPI_Status status;
+        MPI_Wait( RequestQueue.front(), &status );    
+        delete RequestQueue.front();
+        RequestQueue.pop();
+
+        // -- could use some error handling here
+      }
+    }
+    
+    //--------------------------------------------------------------------------------
+    //  RecvData
+    //--------------------------------------------------------------------------------
+    void MaterialGrid::RecvData( )
+    {
+      int Rank, NumProc;
+      MPI_Comm_rank( MPI_COMM_WORLD, & Rank );
+      MPI_Comm_size( MPI_COMM_WORLD, & NumProc );
+
+      ptrdiff_t LocalAllocSize, tmp1, tmp2;
+      LocalAllocSize = fftw_mpi_local_size_3d(  DimX, DimY, DimZ, MPI_COMM_WORLD,
+                                                &tmp1, &tmp2 );
+      
+      RUNTIME_ASSERT( DimXLocal      == tmp1, "!!-------- DimXLocal size changed --------!!" );
+      RUNTIME_ASSERT( DimXLocalStart == tmp2, "!!-------- DimXLocal size changed --------!!" );
+
+
+      // send data sizes
+      MPI_Send( static_cast<void *>( & DimXLocalStart ),
+                sizeof( ptrdiff_t ), MPI_BYTE, 0, VPFFT_MPI_TAG, MPI_COMM_WORLD );
+      MPI_Send( static_cast<void *>( & DimXLocal      ),
+                sizeof( ptrdiff_t ), MPI_BYTE, 0, VPFFT_MPI_TAG, MPI_COMM_WORLD );
+      
+      MPI_Request OrientRequest;
+      MPI_Irecv( static_cast< void* >( OrientationField ),
+                 sizeof( SMatrix3x3 ) * DimXLocal * DimYZ,
+                 MPI_BYTE, 0, VPFFT_MPI_TAG, MPI_COMM_WORLD,
+                 & OrientRequest );
+      
+      MPI_Request StressRequest;
+      MPI_Irecv( static_cast< void* >( StressField ),
+                 sizeof( EigenRep ) * DimXLocal * DimYZ,
+                 MPI_BYTE, 0, VPFFT_MPI_TAG, MPI_COMM_WORLD,
+                 & StressRequest );
+      MPI_Status Status;
+      MPI_Wait( &OrientRequest, & Status );
+      MPI_Wait( &StressRequest, & Status );
+      
+    }
+    
     //--------------------------------------------------------------------------------
     //  ConstructGreensOperator
     //--------------------------------------------------------------------------------
@@ -406,17 +633,12 @@ namespace VPFFT
       M_Mapped = M_Mapped.inverse();
       
       
-      
       std::stringstream Suffix;
       Suffix << "." << DEBUG_INT;
-      //      PrintLagrangeMultiplier( "LagrangeMultiplier.txt" + Suffix.str() );
-      // PrintStress("Stress.txt"  + Suffix.str() );
-
       
-      //      PrintPolarization( "PolarizationBefore.txt" + Suffix.str() );
       for( int i = 0; i < 5; i ++ )   
         fftw_execute( _PolarizationFieldForwardPlan[i] );
-      // PrintPolarization( "PolarizationAfter.txt"  + Suffix.str() );
+
 
       int CutoffX = floor( DimX / 2 );
       int CutoffY = floor( DimY / 2 );
@@ -458,15 +680,16 @@ namespace VPFFT
       //
       //----------------------------------------------
       int DEBUG_NUM_CALLED = 0;
-      for( int Nx = 0; Nx < DimX; Nx ++ )
+      for( int NxIndLocal = 0; NxIndLocal < DimXLocal; NxIndLocal ++ )
       {
         for( int Ny = 0; Ny < DimY; Ny ++ )
         {
           for( int Nz = 0; Nz < DimZ; Nz ++ )
           {
+            int Nx = NxIndLocal + DimXLocalStart;
+
             if( Nx != 0 || Ny != 0 || Nz != 0)
             {
-              
               SVector3 WaveVector( Nx, Ny, Nz );
               
               if( Nx > CutoffX )
@@ -485,27 +708,26 @@ namespace VPFFT
               Tensor4Rank GreensOperator4;
               SMatrix5x5  SymGreensOperator;
               
-              
               if( (   IsEvenX && (Nx == CutoffX || Nx == CutoffX + 1) )
                   || (IsEvenY && (Ny == CutoffY || Ny == CutoffY + 1) )
                   || (IsEvenZ && (Nz == CutoffZ || Nz == CutoffZ + 1) ) )
-                GreensOperator4   = L_Inv.ToTensor4RankRep();
+                GreensOperator4 = L_Inv.ToTensor4RankRep();
               else
-                GreensOperator4   = ConstructGreensOperator( LinearRefMediumStiffness, WaveVector );
+                GreensOperator4 = ConstructGreensOperator( LinearRefMediumStiffness, WaveVector );
             
               SymGreensOperator = SMatrix5x5( LinearAlgebra::Symmetrize( GreensOperator4 ) );  // this is the correct one, debugging
               
               // actually do the work
               for( int i = 0; i < 5; i ++ )
               {
-                DisplacementVariation( Nx, Ny, Nz, i )[0] = 0;
-                DisplacementVariation( Nx, Ny, Nz, i )[1] = 0;
+                DisplacementVariation( NxIndLocal, Ny, Nz, i )[0] = 0;
+                DisplacementVariation( NxIndLocal, Ny, Nz, i )[1] = 0;
                 for( int j = 0; j < 5; j ++ )
                 {
-                  DisplacementVariation( Nx, Ny, Nz, i )[0] -= SymGreensOperator( i, j )
-                                                             * PolarizationField( Nx, Ny, Nz, j )[0];
-                  DisplacementVariation( Nx, Ny, Nz, i )[1] -= SymGreensOperator( i, j )
-                                                             * PolarizationField( Nx, Ny, Nz, j )[1];
+                  DisplacementVariation( NxIndLocal, Ny, Nz, i )[0] -= SymGreensOperator( i, j )
+                                                                     * PolarizationField( NxIndLocal, Ny, Nz, j )[0];
+                  DisplacementVariation( NxIndLocal, Ny, Nz, i )[1] -= SymGreensOperator( i, j )
+                                                                     * PolarizationField( NxIndLocal, Ny, Nz, j )[1];
                 }
               }
             }
@@ -513,8 +735,8 @@ namespace VPFFT
             {
               for( int i = 0; i < 5; i ++ )
               {
-                DisplacementVariation( 0, 0, 0, i )[0] = 0;
-                DisplacementVariation( 0, 0, 0, i )[1] = 0;
+                DisplacementVariation( NxIndLocal, 0, 0, i )[0] = 0;
+                DisplacementVariation( NxIndLocal, 0, 0, i )[1] = 0;
               }
             } // WaveNumber != (0, 0, 0)
           } // DimZ
@@ -527,7 +749,7 @@ namespace VPFFT
       Float NormalizationFactor = static_cast<Float>( 1 ) / (DimX * DimY * DimZ);
       // All displacement will be real
       for( int i = 0; i < 5; i ++ )
-        for( int j = 0; j < DimX * DimY * DimZ; j ++ )
+        for( int j = 0; j < DimXLocal * DimY * DimZ; j ++ )
           _DisplacementVariation[i][j][0] *= NormalizationFactor;
         
       
@@ -556,9 +778,8 @@ namespace VPFFT
       Map< Matrix5x5 > M_Mapped( L_Inv.m );
       M_Mapped = M_Mapped.inverse();
       for( int i = 0; i < 5; i ++ )
-      {
         fftw_execute( _PolarizationFieldForwardPlan[i] );
-      }
+      
       
       int CutoffX = floor( DimX / 2 );
       int CutoffY = floor( DimY / 2 );
@@ -570,12 +791,13 @@ namespace VPFFT
       
       const Float Two_PI = static_cast<Float>( 2 ) * PI;
 
-      for( int Nx = 0; Nx < DimX; Nx ++ )
+      for( int NxIndLocal = 0; NxIndLocal < DimXLocal; NxIndLocal ++ )
       {
         for( int Ny = 0; Ny < DimY; Ny ++ )
         {
           for( int Nz = 0; Nz < DimZ; Nz ++ )
           {
+            int Nx = NxIndLocal + DimXLocalStart;
             if( Nx != 0 || Ny != 0 || Nz != 0)
             {
               SVector3 WaveVector( Nx, Ny, Nz );
@@ -586,8 +808,7 @@ namespace VPFFT
                 WaveVector[1] -=  DimY;
               if( Nz > CutoffZ )
                 WaveVector[2] -=  DimZ;
-
-
+              
               WaveVector[0] /= (DimX * XVoxelLength );
               WaveVector[1] /= (DimY * YVoxelLength );  // constant factor in front of the K vector doesn't matter - cancelled out in the
               WaveVector[2] /= (DimZ * ZVoxelLength );  // construction of green's operator  (that's why normalization doesn't change anything)
@@ -600,23 +821,23 @@ namespace VPFFT
               if( (   IsEvenX && (Nx == CutoffX || Nx == CutoffX + 1) )
                   || (IsEvenY && (Ny == CutoffY || Ny == CutoffY + 1) )
                   || (IsEvenZ && (Nz == CutoffZ || Nz == CutoffZ + 1) ) )
-                GreensOperator4   = L_Inv.ToTensor4RankRep();
+                GreensOperator4 = L_Inv.ToTensor4RankRep();
               else
-                GreensOperator4   = ConstructGreensOperator( LinearRefMediumStiffness, WaveVector );
+                GreensOperator4 = ConstructGreensOperator( LinearRefMediumStiffness, WaveVector );
             
               SymGreensOperator = SMatrix5x5(  GreensOperator4  );  // Not symmetrizing or anti-symmetrizing, waiting till the end
               
               // actually do the work
               for( int i = 0; i < 5; i ++ )
               {
-                DisplacementVariation( Nx, Ny, Nz, i )[0] = 0;
-                DisplacementVariation( Nx, Ny, Nz, i )[1] = 0;
+                DisplacementVariation( NxIndLocal, Ny, Nz, i )[0] = 0;
+                DisplacementVariation( NxIndLocal, Ny, Nz, i )[1] = 0;
                 for( int j = 0; j < 5; j ++ )
                 {
-                  DisplacementVariation( Nx, Ny, Nz, i )[0] -= SymGreensOperator( i, j )
-                                                             * PolarizationField( Nx, Ny, Nz, j )[0];
-                  DisplacementVariation( Nx, Ny, Nz, i )[1] -= SymGreensOperator( i, j )
-                                                             * PolarizationField( Nx, Ny, Nz, j )[1];
+                  DisplacementVariation( NxIndLocal, Ny, Nz, i )[0] -= SymGreensOperator( i, j )
+                                                                     * PolarizationField( NxIndLocal, Ny, Nz, j )[0];
+                  DisplacementVariation( NxIndLocal, Ny, Nz, i )[1] -= SymGreensOperator( i, j )
+                                                                     * PolarizationField( NxIndLocal, Ny, Nz, j )[1];
                 }
               }
             }
@@ -624,8 +845,8 @@ namespace VPFFT
             {
               for( int i = 0; i < 5; i ++ )
               {
-                DisplacementVariation( 0, 0, 0, i )[0] = 0;
-                DisplacementVariation( 0, 0, 0, i )[1] = 0;
+                DisplacementVariation( NxIndLocal, 0, 0, i )[0] = 0;
+                DisplacementVariation( NxIndLocal, 0, 0, i )[1] = 0;
               }
             } // WaveNumber != (0, 0, 0)
           } // DimZ
@@ -638,17 +859,17 @@ namespace VPFFT
       Float NormalizationFactor = static_cast<Float>( 1 ) / (DimX * DimY * DimZ);
       // All displacement will be real
       for( int i = 0; i < 5; i ++ )
-        for( int j = 0; j < DimX * DimY * DimZ; j ++ )
+        for( int j = 0; j < DimXLocal * DimY * DimZ; j ++ )
           _DisplacementVariation[i][j][0] *= NormalizationFactor;
 
       // The Displacement Variation is now the orientation 
       //  note that we may change the ordering so that we're running in single index instead of the 3-tuples.
-      for( int Nx = 0; Nx < DimX; Nx ++ )
+      for( int NxIndLocal = 0; NxIndLocal < DimXLocal; NxIndLocal ++ )
         for( int Ny = 0; Ny < DimY; Ny ++ )
           for( int Nz = 0; Nz < DimZ; Nz ++ )
           {
-            Orientation( Nx, Ny, Nz ) += TimeStep * ( ( DisplacementVariation( Nx, Ny, Nz ).ToMatrixRep() ).AntiSymmetrize()
-                                                      + ShearRate( Nx, Ny, Nz ) );
+            Orientation( NxIndLocal, Ny, Nz ) += TimeStep * ( ( DisplacementVariation( NxIndLocal, Ny, Nz ).ToMatrixRep() ).AntiSymmetrize()
+                                                      + ShearRate( NxIndLocal, Ny, Nz ) );
             
           }
       UpdateSchmidtTensors();
@@ -678,8 +899,12 @@ namespace VPFFT
                                                 int NumMaxIterations, Float TimeStep,
                                                 Float ConvergenceEpsilon )
     {
-      InitializeComputation( MacroscopicStrainRate );
+
       
+      UpdateSchmidtTensors();
+      InitializeComputation( MacroscopicStrainRate );
+
+  
       //----------------------
       //  TO DEBUG - must be unified
       const Float NewtonIterationEpsilon = 5e-4;
@@ -688,15 +913,20 @@ namespace VPFFT
       //----------------------
       SMatrix5x5 LinearRefMediumStiffness = BuildLinearRefMediumStiffness();
 
+      //      std::cout << "Finished LinearRefMediumStiffness " << std::endl;
+      
+
+      
       int   StepsTaken = 0;
       Float StrainRateErrorNorm = 0;
       Float StressErrorNorm     = 0;
       EigenRep TotalAveragedStress;
-      //-------------------- SETUP OpenMP
-      int NumThreads = 8;
-      omp_set_num_threads( NumThreads );
-      std::cout << "NumThreads " << NumThreads << std::endl;
       
+      //-------------------- SETUP OpenMP
+      // int NumThreads = 8;
+      // omp_set_num_threads( NumThreads );
+      // std::cout << "NumThreads " << NumThreads << std::endl;
+
       DEBUG_INT = 0;
       do
       {
@@ -708,37 +938,14 @@ namespace VPFFT
         Float Max_NR_Error         = 0;
         //--------------------------------------
         //  for non-OpenMP
-        //         EigenRep AveragedStress     ( 0, 0, 0, 0, 0 );
-        //         EigenRep AveragedStrainRate ( 0, 0, 0, 0, 0 );
-        //         EigenRep AveragedStrainRateVariation ( 0, 0, 0, 0, 0 );   // loop invariation = should be zero
-        
- 
-        vector<EigenRep> AveragedStress             ( NumThreads );
-        vector<EigenRep> AveragedStrainRate         ( NumThreads );
-        vector<EigenRep> AveragedStrainRateVariation( NumThreads );   // loop invariation = should be zero
-        for( int TId = 0; TId < NumThreads; TId ++ )
-        {
-          AveragedStress[TId] = EigenRep(0, 0, 0, 0, 0);
-          AveragedStrainRate[TId] = EigenRep(0, 0, 0, 0, 0);
-          AveragedStrainRateVariation[TId] = EigenRep(0, 0, 0, 0, 0);
-        }
+        EigenRep AveragedStress     ( 0, 0, 0, 0, 0 );
+        EigenRep AveragedStrainRate ( 0, 0, 0, 0, 0 );
+        EigenRep AveragedStrainRateVariation ( 0, 0, 0, 0, 0 );   // loop invariation = should be zero
         
         StrainRateEvolutionWithFFT( LinearRefMediumStiffness );
-        TotalAveragedStress = EigenRep(0, 0, 0, 0, 0);
         
-#pragma omp parallel for                 \
-  reduction( + : AverageVariationNorm )         \
-  reduction( + : AverageStressNorm )            \
-  reduction( + : Max_NR_Error )                 \
-  reduction( + : StressErrorNorm )               \
-  reduction( + : StrainRateErrorNorm )                 
-#pragma omp nowait
-        for( int i = 0; i < DimX; i ++ )
+        for( int i = 0; i < DimXLocal; i ++ )
         {
-//           if(i == 0)
-//           {
-//             std::cout << "Num Threads " << omp_get_num_threads() << std::endl;
-//           }
           for( int j = 0; j < DimY; j ++ )
           {
             for( int k = 0; k < DimZ; k ++ )
@@ -748,7 +955,8 @@ namespace VPFFT
               Float    MaxResolvedStress = GetMaxRSS( Stress(i, j, k),
                                                       SchmidtTensorList(i, j, k),
                                                       CRSS(i, j, k) );
-              
+
+              //          std::cout << "DisplacementVar " << DisplacementVariation( i, j, k ) << std::endl;
               Stress(i, j, k) /= MaxResolvedStress;
               Stress(i, j, k)
                 = Solvers::SolveConstrainedConstitutiveEquations( Stress(i, j, k),
@@ -769,19 +977,22 @@ namespace VPFFT
                  = Solvers::ApplyConstitutiveEquations( Stress(i, j, k),
                                                         SchmidtTensorList(i, j, k),
                                                         CRSS(i, j, k), GammaDotBase, RateSensitivity );
+               
+               
+
               SetPolarizationField( i, j, k,
                                     Stress(i, j, k)
                                     -  LinearRefMediumStiffness * ( DisplacementVariation(i, j, k)  )   );
               UpdateLagrangeMultiplier( i, j, k, LinearRefMediumStiffness, LocalStrainRate, MacroscopicStrainRate, 1 );
               
-              int ThreadID = omp_get_thread_num();
+//               int ThreadID = omp_get_thread_num();
               
-              // AveragedStress          += Stress(i, j, k);
-//               AveragedStrainRate      += LocalStrainRate;
+              AveragedStress          += Stress(i, j, k);
+              AveragedStrainRate      += LocalStrainRate;
 
           
-              AveragedStress[ThreadID]          += Stress(i, j, k);
-              AveragedStrainRate[ThreadID]      += LocalStrainRate;
+//               AveragedStress[ThreadID]          += Stress(i, j, k);
+//               AveragedStrainRate[ThreadID]      += LocalStrainRate;
 
           
               EigenRep StrainRateError = LocalStrainRate - MacroscopicStrainRate - LocalStrainRateVariation ;  // \dot{epsilon}(x) - d(x); d(x) = \tilde(d) + E-dot
@@ -792,35 +1003,82 @@ namespace VPFFT
           }
         }
         
-        StressErrorNorm      /= static_cast<Float>( DimX * DimY * DimZ );
-        StrainRateErrorNorm  /= static_cast<Float>( DimX * DimY * DimZ );
-        
-        EigenRep TotalAveragedStrainRate(0, 0, 0, 0, 0);
 
-        for( int TId = 0; TId < NumThreads; TId ++ )
+
+        //-----------------------  Synchronization  --------------------
+        //
+        for( int i = 0; i < 5; i ++ )
         {
-          TotalAveragedStrainRate += AveragedStrainRate[TId];
-          TotalAveragedStress += AveragedStress[TId];
+          Float Sum = 0;
+          MPI_Allreduce(  & AveragedStress(i),
+                          & Sum,
+                          1,
+                          VPFFT_MPI_FLOAT_TYPE,
+                          MPI_SUM,
+                          MPI_COMM_WORLD );
+          AveragedStress(i) = Sum;
+
+          MPI_Allreduce(  & AveragedStrainRate(i),
+                          & Sum,
+                          1,
+                          VPFFT_MPI_FLOAT_TYPE,
+                          MPI_SUM,
+                          MPI_COMM_WORLD );          
+          AveragedStrainRate(i) = Sum;
         }
+        Float Tmp;
+        MPI_Allreduce(  & StressErrorNorm,
+                        & Tmp,
+                        1,
+                        VPFFT_MPI_FLOAT_TYPE,
+                        MPI_SUM,
+                        MPI_COMM_WORLD );          
+  
+        StressErrorNorm = Tmp / static_cast<Float>( DimX * DimY * DimZ );
         
-        TotalAveragedStress       /= static_cast<Float>( DimX * DimY * DimZ );  
-        TotalAveragedStrainRate   /= static_cast<Float>( DimX * DimY * DimZ );
+        MPI_Allreduce(  & StrainRateErrorNorm,
+                        & Tmp,
+                        1,
+                        VPFFT_MPI_FLOAT_TYPE,
+                        MPI_SUM,
+                        MPI_COMM_WORLD );          
+  
+        StrainRateErrorNorm = Tmp / static_cast<Float>( DimX * DimY * DimZ );
         
-        StressErrorNorm     /= std::sqrt( LinearAlgebra::InnerProduct( TotalAveragedStress,     TotalAveragedStress) ) ;
+        AveragedStress       /= static_cast<Float>( DimX * DimY * DimZ );  
+        AveragedStrainRate   /= static_cast<Float>( DimX * DimY * DimZ );
+        TotalAveragedStress = AveragedStress;
+        //-------------------------------------------------------------------
+       
+        StressErrorNorm     /= std::sqrt( LinearAlgebra::InnerProduct( AveragedStress,     AveragedStress) ) ;
         StrainRateErrorNorm /= std::sqrt( LinearAlgebra::InnerProduct( MacroscopicStrainRate, MacroscopicStrainRate ) );
         
         StepsTaken ++;
-        // need convergence averages
-        //        std::cout << " Max NR Error ============================================================== " << Max_NR_Error << std::endl;
-   //      std::cout << " Averaged Stress           " << std::setw(10) << AveragedStress     << " || " << StressErrorNorm << std::endl;
-//         std::cout << " Averaged Strain           " << std::setw(10) << AveragedStrainRate << " || " << StrainRateErrorNorm << std::endl;
+//         int Rank;
+//         MPI_Comm_rank( MPI_COMM_WORLD, & Rank );
+//         if( Rank == 0 )
+//         {
+//           // need convergence averages
+//           std::cout << " Max NR Error ============================================================== " << Max_NR_Error << std::endl;
+//           std::cout << " Averaged Stress           " << std::setw(10) << AveragedStress     << " || " << StressErrorNorm << std::endl;
+//           std::cout << " Averaged Strain           " << std::setw(10) << AveragedStrainRate << " || " << StrainRateErrorNorm << std::endl;
+//         }
+        
       } while( StepsTaken < NumMaxIterations
                && ( StressErrorNorm > ConvergenceEpsilon
                     || StrainRateErrorNorm > ConvergenceEpsilon ) );
+      
 
+//       std::cout << "finished debuggin " << std::endl;
+//       exit(0); // DEBUG
+      
       OrientationEvolutionWithFFT( LinearRefMediumStiffness, TimeStep );  // move L out, and we can move this out
+
+      std::cout << "------------------------ DONE WITH ORIENTATION " << std::endl;
       UpdateVoxelLength  ( TimeStep, MacroscopicStrainRate.ToMatrixRep() );
+      std::cout << "------------------------ DONE WITH Voxel Length " << std::endl;
       UpdateHardeningCRSS( TimeStep );
+      std::cout << "------------------------ DONE WITH Hardening" << std::endl;
       
       
       return TotalAveragedStress;
@@ -953,12 +1211,20 @@ namespace VPFFT
       for ( int i = 0; i < NumTimeSteps; i ++ )
       {
         EigenRep AveragedStress = RunSingleStrainStep( MacroscopicStrainRate, NumMaxIterations, TimeStep, ConvergenceEpsilon );
+        
+        MPI_Barrier( MPI_COMM_WORLD );
+        int Rank;
+        MPI_Comm_rank( MPI_COMM_WORLD, & Rank );
         MacroscopicStrain +=  MacroscopicStrainRate * TimeStep;       // update strain
-        os << i << " " << MacroscopicStrain << " "
-           << AveragedStress << " "
-           << std::sqrt( LinearAlgebra::InnerProduct( MacroscopicStrain, MacroscopicStrain) ) << " "
-           << std::sqrt( LinearAlgebra::InnerProduct( AveragedStress, AveragedStress) ) << " "
-           << std::endl;
+        if( Rank == 0 )
+        {
+          
+          os << i << " " << MacroscopicStrain << " "
+             << AveragedStress << " "
+             << std::sqrt( LinearAlgebra::InnerProduct( MacroscopicStrain, MacroscopicStrain) ) << " "
+             << std::sqrt( LinearAlgebra::InnerProduct( AveragedStress, AveragedStress) ) << " "
+             << std::endl;
+        }
       }
     }
   } // DataStructures

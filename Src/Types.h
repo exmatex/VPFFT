@@ -4,12 +4,21 @@
 #include <string>
 #include <cstdlib>
 #include <cstring>
+#include <mpi.h>
 using std::string;
 
 typedef int Int;
 typedef unsigned int UInt;
 typedef string::size_type Size_Type;
-typedef double Float; //!!!
+
+//-----------------------------------------------
+typedef double Float; //!!!  <---------  CHECK HARD CODING OF MPI_REDUCE_SCATTER! (SEE BELOW AS WELL)
+
+#ifndef VPFFT_MPI_FLOAT_TYPE
+#define VPFFT_MPI_FLOAT_TYPE MPI_DOUBLE
+#endif
+//-----------------------------------------------
+
 typedef double Double;
 //typedef short int IntensityT;
 typedef Float IntensityT;
