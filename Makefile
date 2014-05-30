@@ -34,7 +34,9 @@ CPPS =  $(patsubst %.cpp, $(PROJ_PATH)/%.cpp, $(PROJ_CPPS) )
 #----------------------------------------------------
 #  Specify external template library location (BOOST)
 #----------------------------------------------------
-EIGEN_PATH = ExtLib/eigen-eigen-6e7488e20373/
+EIGEN_PATH = /Users/li31/LLNL/ExMatEx/VonnegutSvn/svn/proxyApps/VPFFT/trunk/ExtLib/eigen-eigen-6e7488e20373
+
+FFTW_PATH = /Users/li31/LLNL/ExtLib/fftw3/
 
 OBJS =  $(patsubst %.cpp, %.o, $(CPPS))
 OBJS_DEBUG =  $(patsubst %.cpp, %.do, $(CPPS))
@@ -44,14 +46,14 @@ OBJS_DEBUG =  $(patsubst %.cpp, %.do, $(CPPS))
 #  Specifying precomile external library locations
 #
 #----------------------------------------------------
-INCL = -I. -I${EIGEN_PATH} -I/opt/local/include/
+INCL = -I. -I${EIGEN_PATH} -I${FFTW_PATH}/include
 
 #----------------------------------------------------
 #
 #  Putting together library locations
 #
 #----------------------------------------------------
-LIB_ROOT = -L/opt/local/lib/ 
+LIB_ROOT = -L${FFTW_PATH}/lib
 
 #----------------------------------------------------
 #
@@ -66,7 +68,7 @@ RELEASE_FLAGS +=  ${LIB_ROOT}
 DEBUG_FLAGS   +=  ${LIB_ROOT}	
 
 LIBS   =  -lm -lfftw3_threads -lfftw3 -lfftw3_mpi -lpthread
-CC     = mpic++ # /opt/local/bin/g++-mp-4.5   # g++ #icpc
+CC     = mpicxx-openmpi-gcc46   # /opt/local/bin/g++-mp-4.5   # g++ #icpc
 
 
 
