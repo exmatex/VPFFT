@@ -131,10 +131,10 @@ namespace VPFFT
       {
         VPFFT::LinearAlgebra::SMatrix3x3 m;
 
-        m.BuildActiveEulerMatrix (  rand() % 360,
-                                    rand() % 180,
-                                    rand() % 360 );  // this is not uniform sampling - just for debugging
-
+        m.BuildActiveEulerMatrix (  DEGREE_TO_RADIAN( rand() % 360 ),
+                                    DEGREE_TO_RADIAN( rand() % 180 ),
+                                    DEGREE_TO_RADIAN( rand() % 360 ) );  // this is not uniform sampling - just for debugging
+	
         VPFFT::LinearAlgebra::SVector3 v;
 
         v.Set( rand() % Grid.NumX(),
@@ -280,10 +280,11 @@ namespace VPFFT
       const int NumX = 16;
       const int NumY = 16;
       const int NumZ = 16;
-
+      
+      std::cout << "Sample Grid construction " << std::endl;
       
       VPFFT::DataStructures::MaterialGrid SampleGrid( NumX, NumY, NumZ );
-
+      std::cout << "After Sample Grid construction " << std::endl;
       
       EigenRep   *StressList;
       SMatrix3x3 *OrientList;
@@ -292,8 +293,11 @@ namespace VPFFT
       const int RandSeed = 0;
       int Rank;
 
-
+      
+      std::cout << "Before comm rank " << std::endl;
       MPI_Comm_rank( MPI_COMM_WORLD, & Rank );
+      std::cout << "my rank " << Rank << std::endl;
+
       if( Rank == 0 )
       {
         OrientList = new SMatrix3x3[ NumX * NumY * NumZ ];
