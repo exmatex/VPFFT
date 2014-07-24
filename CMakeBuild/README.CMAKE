@@ -1,0 +1,1 @@
+Move CMakeList.example to the root directory of VPFFT and change the relevant library paths to use CMake for building.

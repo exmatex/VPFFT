@@ -1,0 +1,47 @@
+# This is the root ITK CMakeLists file.
+CMAKE_MINIMUM_REQUIRED(VERSION 2.4)
+IF(COMMAND CMAKE_POLICY)
+  CMAKE_POLICY(SET CMP0003 NEW)
+ENDIF(COMMAND CMAKE_POLICY)
+
+
+#----------------------------
+set( VPFFT_List  "Src/main.cpp" )
+set( VPFFT_List  ${VPFFT_List} "Src/main.cpp" )
+set( VPFFT_List  ${VPFFT_List} "Src/Config.cpp")
+set( VPFFT_List  ${VPFFT_List} "Src/LinearAlgebra.cpp" )
+set( VPFFT_List  ${VPFFT_List} "Src/Parser.cpp" )
+set( VPFFT_List  ${VPFFT_List} "Src/UnitTester.cpp" )
+set( VPFFT_List  ${VPFFT_List} "Src/Debug.cpp" )  
+set( VPFFT_List  ${VPFFT_List} "Src/MaterialGrid.cpp" )
+set( VPFFT_List  ${VPFFT_List} "Src/Solvers.cpp" )
+       
+
+
+#----------------------------
+
+
+
+set( CMAKE_C_COMPILER "mpicc-openmpi-gcc46") 
+set( CMAKE_CXX_COMPILER "mpicxx-openmpi-gcc46" )
+
+# This project is designed to be built outside the Insight source tree.
+PROJECT(VPFFT++)
+set( EIGEN_PATH "/Users/li31/LLNL/ExMatEx/VonnegutSvn/svn/proxyApps/VPFFT/trunk/ExtLib/eigen-eigen-6e7488e20373")
+set( FFTW_PATH "/Users/li31/LLNL/ExtLib/fftw3")
+
+include_directories("Src/")
+include_directories(${EIGEN_PATH})
+include_directories(${FFTW_PATH}/include)
+
+
+
+
+find_library( FFTW_LIBRARY_MPI libfftw3_mpi.a HINTS ${FFTW_PATH}/lib)
+find_library( FFTW_LIBRARY libfftw3.a HINTS ${FFTW_PATH}/lib)
+find_library( FFTW_LIBRARY_THREADS libfftw3_threads.a HINTS ${FFTW_PATH}/lib)
+ADD_EXECUTABLE( VPFFT++ ${VPFFT_List} )	
+TARGET_LINK_LIBRARIES(  VPFFT++ ${FFTW_LIBRARY} ${FFTW_LIBRARY_MPI} ${FFTW_LIBRARY_THREADS} ) 
+
+
+
