@@ -1,0 +1,403 @@
+%LaTeX
+%\documentclass[twoside]{article}
+\documentclass[11pt]{article}
+%This makes the margins little smaller than the default
+%\usepackage{fullpage}
+%fullpage is not installed on andrew, so we'll just use these lines.
+\oddsidemargin0cm
+\topmargin-0.5cm     %I recommend adding these three lines to increase the 
+\textwidth16.5cm   %amount of usable space on the page (and save trees)U
+\textheight20.5cm  
+
+\usepackage{eqparbox}
+
+\usepackage{natbib}
+
+%if you need more complicated math stuff, you should use the next line
+\usepackage{amsmath}
+%This next line defines a variety of special math symbols which you
+%may need
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{algorithmic}
+\usepackage{algorithm}
+\usepackage{psfrag}
+%This next line (when uncommented) allow you to use encapsulated
+%postscript files for figures in your document
+\usepackage{epsfig}
+\usepackage{subfigure}
+%plain makes sure that we have page numbers
+\pagestyle{plain}
+%
+%
+%
+\title{
+  Proxy Application:  Full Field Viscoplasticity Simulation via Fast Fourier Transform
+}
+\author{
+  S. F. Li, R. Lebensohn
+}
+\date{
+  \today
+     }
+
+%%This defines a new command \questionhead which takes one argument and
+%%prints out Question #. with some space.
+\newcommand{\myTitle}[1]
+  {\bigskip\bigskip
+   \noindent{\LARGE\bf #1}
+   \bigskip}
+   
+\floatname{algorithm}{Procedure}
+\renewcommand{\algorithmicrequire}{\textbf{Input: }}
+\renewcommand{\algorithmicensure}{\textbf{Output: }}
+\newcommand{\AlgoInput}{\textbf{Input: }}
+\newcommand{\AlgoDesc}{\textbf{Description: }}
+\newcommand{\AlgoOutput}{\textbf{Output: }}
+\newcommand{\AlgoRequires}{\textbf{Requires: }}
+\newcommand{\tab}{\hspace*{2em}}
+\newcommand{\RefFig}[1]{Fig. \ref{#1}}
+\newcommand{\RefEq}[1] {Eq. (\ref{#1})}
+\newcommand{\RefSec}[1]{Sec. \ref{#1}}
+\newcommand{\RefAlgo}[1]{Algo. \ref{#1}}
+\renewcommand{\algorithmiccomment}[1]{{\# #1}}
+\newcommand\ALIGNEDCOMMENT[1]{\hfill\eqparbox{COMMENT}{\# #1}}
+\newcommand\LONGCOMMENT[1]{%
+  \hfill\#\ \begin{minipage}[t]{\eqboxwidth{COMMENT}}#1\strut\end{minipage}%
+}
+%
+%-----------------------------------
+\begin{document}
+%-----------------------------------
+ 
+\newcommand{\captionfonts}{\slshape}
+
+\makeatletter  % Allow the use of @ in command names
+\long\def\@makecaption#1#2{%
+  \vskip\abovecaptionskip
+  \sbox\@tempboxa{{\captionfonts #1: #2}}%
+  \ifdim \wd\@tempboxa >\hsize
+    {\captionfonts #1: #2\par}
+  \else
+    \hbox to\hsize{\hfil\box\@tempboxa\hfil}%
+  \fi
+  \vskip\belowcaptionskip}
+\makeatother   % Cancel the effect of \makeatletter
+ 
+ 
+\maketitle
+
+%\section{VPFFT:  Numerical Solution to Non-linear Visco-plasticity}
+
+\abstract{
+The full field numerical solution to the polycrystal viscoplasticity problem developed by Lebensohn et al is summarized in this document.  The algorithm (Viscoplastic FFT, or VPFFT) is described here in a mostly mathematical manner with hopefully minimal material science specific jargon such that it is understandable by people outside the field of viscoplasticity and texture.  Detailed derivations are left out here, and we will refer the reader to the original literature referenced at the end.}
+
+\section{Overview}
+Typical material, such as most metals, are inhomogeneous in its response to mechanical stimuli, which means that different regions within the volume of the sample may react differently to applied stress.  This anisotropy comes from the fact that most materials are polycrystalline, i.e., a single continuous sample that is composed of many smaller crystals, or grains, of different crystallographic orientations.  Because material response for a single grain is directionally dependent, orientation of each individual grain inside a polycrystalline material contribute to the macroscopic behavior in a different way.  Conversely, application of macroscopic body force would also result in different reactions from grains of varying orientations within the sample.  To further complicate matter, the local and global responses of a material is also dependent on the boundary conditions that connects each of the grains together with its neighbors.  This implies that grains with the same orientation within the sample may behave differently because of the local neighborhood environment.  The goal of predicting the mechanical behavior of a material must then take into account all of the aforementioned complications.  The viscoplastic FFT code is designed to address the problem of a polycrystalline sample under plastic deformation, with the assumption that elastic deformation in the crystal lattice plays little role in the overall evolution.
+
+In the context of polycrystal viscoplasticity, or plastic deformation of polycrystalline material with negligible elastic deformation, the behavior for each sample point can be described by the rate-sensitive equation,
+
+\begin{eqnarray}
+\dot{ \epsilon }_{ij} \left( \vec{x} \right) = \dot{ \gamma }_0 \sum_{k} m_{ij}^{(k)}( \vec{x}) 
+\left(
+\frac{|m^{(k)}_{\alpha \beta }(\vec{x}) \sigma_{\alpha \beta} '(\vec{x}) |}{\tau^{(k})(\vec{x}) }
+ \right )^n
+sgn \left( m^{(k)}_{\alpha \beta}(\vec{x}) \sigma'(\vec{x})_{\alpha \beta} \right).
+\label{eq:ViscoplasticityModel}
+\end{eqnarray}
+
+We have written the equation in component form so that the notations are consistent with the algorithm definition shown later in this document.  The strain rate, $\dot{\epsilon}_{ij}$, is a two dimensional matrix in our chosen representation.  We have used Einstein summation convention here, which means that repeated indices are explicitly summed, i.e., $\sum_i a_i b_i = a_i b_i$.  Greek letters are used explicitly to indicate ``dummy indices."  The Schmid tensor, $m_{ij}(\vec{x})$ is responsible for describing the anisotropic local response of the system.  Note that there is one such Schmid factor per slip system, enumerated by the index $(k)$.  The parenthesis is inserted to differentiate this index from an exponent.  The deviatoric stress is given by $\sigma'(\vec{x})$.
+
+Given the model from \RefEq{eq:ViscoplasticityModel}, the purpose of the simulation code is to solve for the solution of the strain rate, $\dot{\epsilon}(\vec{x})$ and rotation rate, $\dot{\omega}(\vec{x})$ at each time step $t_n$, which determines the orienation and strain state evolution of the system.  The domain of the problem is a 3D volume representative of the physical sample.  In some cases, this is direct input from 3D measurements using EBSD OIM or X-ray methods (references).  Typically, the sample domain is discretized by a regular, rectilinear grid, although this is not a requirement.  An iterative algorithm, described in  (\RefAlgo{Algo:VPFFT}), is employed to solve for this full field solution. 
+
+% This algorithm requires the use of a root-finding method for algebraic equation and an efficient implementation of Fourier transform method on the sample domain.  The evolution of the system is captured by performing time step integration with the solved strain rate.
+
+
+%The algorithm presented here is an iterative method to solve a system of constrained differential equations describing the material point motion (velocity field) and the stress and strain rate field in the system.  The solution process first solves for a modified, linear velocity field using the methods of Green's function.  Because we are using Green's function method for the solution of the strain rate field, we can take advantage of the use of Fourier transform to reduce the differential equations into algebraic one.  Additionally, one may take advantage of Fast Fourier Transform (FFT) to significantly reduce computational time in the numerical implementation.  The resulting velocity field is used as an input parameter for an nonlinear algebraic equation describing the stress state at each material point.  The strain rate is calculated by directly applying the viscoplastic model.
+
+\section{Algorithm}
+
+\subsection{Introduction}
+
+The basis of this algorithm is to compute the local strain rate and the lattice rotation rate of the sample volume at a given time, and the evolution of the material is captured by time-step integration of these two variables.  The lattice rotation rate updates the evolution of local crystallography, which reorients the slip directions and resolved shear stresses via changes in the Schmidt tensor.  The local admissible stress states are computed using this updated crystal orientation along with the strain rate at each time step.  In this algorithm, the stress state, strain rate, and lattice rotation rate are all computed by solving \RefEq{eq:ViscoplasticityModel} iteratively, which is the scope of this section.
+
+
+\subsection{Rate Calculations}
+
+Most of the algorithm is described in terms of strain rate computation ( \RefAlgo{Algo:EvolveStrainRateDeviation}, \RefAlgo{Algo:VPFFT} ), but in fact, the numerical implementation would solve for the velocity gradient,  $\dot{\epsilon}_{ij} = \frac{1}{2}( v_{i,j} + v_{j,i})$ instead.  This is because both the strain rate and rotation rate happen to be the symmetrized and anti-symmetrized  version of $v_{i,j}$. Because the strain and lattice rotation rate are the symmetrized and anti-symmetrized version of the velocity gradient of the material points, calculating each field separately is completely redundant.  
+
+\subsubsection{Initialization}
+
+Assuming that the data structure describing the sample volume is already initialized with local orientation, critical resolved shear stress, and appropriate Schmidt factors, the algorithm requires that we start by finding a estimate for an \textit{initial reference medium}, used to improve convergence of strain rate calculation.  This consists of an spatial average of the material properties given by \RefAlgo{Algo:InitRefMedium}.  In our representation, this is given by a fourth rank tensor.  Initial guesses of the stain rate for each material point is assumed to be the same as its macroscopic counterpart, and its corresponding stress state is calculated based on the model given by \RefEq{eq:ViscoplasticityModel}, which is shown in \RefAlgo{Algo:SolConEq}.  The variation from the volume averaged stress state is calculated at each sample point, and it is used as an initial guess for the polarization field, which models the heterogeneity of the system.
+
+\subsubsection{Iteration Step}
+
+After initialization, a number of steps are performed iteratively until convergence is reached for the strain rate and the stress state.  The detailed convergence behavior and theoretical underpinning can be found in (References).  Here, we will describe the mechanical aspect of the algorithm.
+
+At each of the iteration steps, the strain rate deviation is computed in the Fourier space by first transforming the polarization field.  A Green's operator in the Fourier space is constructed from \RefAlgo{Algo:ConstructGreensOperator}.  The symmetrized Green's Operator, combined with the polarization field from the previous iteration step, $n$, is used to estimate the strain rate deviation in frequency space in the the step $n+1$.  A modified version of \RefEq{eq:ViscoplasticityModel} with compatibility constraint, is used to solve for a proposed stress state of iteration step $n+1$ given the strain field deviation (Reference).  This is implemented by finding the root of an algebraic equation, shown in \RefAlgo{Algo:ConstrainedConEq}.  Applying the usual constitutive equation of \RefEq{eq:ViscoplasticityModel} to the proposed stress state, the strain rate for iteration step $n+1$ is acquired.  The Lagrange Multiplier, acting as a constraint force, is updated along with the polarization field.  This process continues until both the strain rate and the stress state achieved convergence.
+
+We should remark that the use of the Fourier space is a consequence of the solution method described in (Reference).  Because the sample space is discretized for the computation, discrete Fourier transform is used to go between Fourier and real space (sample volume grid).  Subsequently, there is also a one-to-one correspondence between the real space points and Fourier points.  In this context, the spatial resolution also dictates the numerical resolution in the Fourier space.  Sample points that are too sparse would result in a lack of sensitivity to the so-called ``high-frequency" components, or small spatial features, affecting the convergence and accuracy of each strain rate time step.
+
+The application of Fourier transform seen in the iteration step means that the ability to perform parallel, fast discrete Fourier transform is essential to this algorithm.  Similarly, the ability to reliably find the root of an algebraic equation is crucial to the solution process.  Note that the Green's operator is explicitly constructed at each of the iterative step, but in fact it could be calculated ahead of time at the cost of extra memory.  
+
+
+%The full field strain rate calculation is responsible for majority of the computation in the VPFFT code.  At each time step, a new strain rate is computed for each sample point.  This strain rate is computed by an iterative method that solves a non-linear differential equation relating the local strain and stress of the system.  This strain rate depends on two local material properties, crystallographic orientation and critically resolved shear stress, at each sample point. By applying the operator splitting method (Ref) (introduces an auxiliary \textit{linear reference material}) and the methods of Green's function, this non-linear PDE is turned into an algebraic equation at each sample point, readily solved by the Newton-Raphson method or any other root finder.  This comes at a cost of having to perform some of the computation in the Fourier space, which requires the Fourier transform of the so called polarization field $ \phi(\vec{x}) $ used as part of the solution process.
+
+\section{List of Requirements}
+
+\begin{itemize}
+\item
+	Parallel fast Fourier transform (Parallel FFT)
+\item
+	Fast algebraic root finder
+\item
+	Linear algebra packages optimized for small matrices 
+\item
+	Data structure holding the input and output sample points
+\item
+    Property map holding the reference strain rates, sample phase structure, and strain sensitivity
+\end{itemize}
+
+%The steps that require the use of FFT are 12 and 20, while steps 4 and 13 require the use of a non-linear solver for small systems of equations.  Steps 8, 9, and 10 can take advantage of fast matrix inverter for small matrices of size $4 \times 4$.  Step 21 can be a completely separate application, as the level of details in the hardening law varies.  For example, input from dislocation dynamics simulations can be used here.
+
+
+\begin{algorithm}
+\caption{SingleTimeStepVPFFT}
+\AlgoInput{ \textbf{Data}, \textbf{PhasePropertyMap}, \textbf{MacroscopicField}, $\dot{E}$}
+
+\textbf{Desc : }
+\\ \tab \textbf{Data} is a list of tuples, $( \vec{x}_i, \vec{q_i}, \chi_{phase}, \tau)$ describing the simulation domain.  $\tau$ is the critical resolved shear stress used as an effective parameter to control the strain rate of the material. 
+\\ \tab \textbf{PhasePropertyMap} maps the phase ID $\chi_{phase}$, the material phase to its reference strain rate and rate sensitivity, crystal structure, glide plane normals, and glide directions.
+\\ \tab \textbf{MacroscopicField} is the average external perturbation to the system for this time step.
+\\ \tab $\mathbf{ \dot{E}}$  is the macroscopic strain on the sample.
+
+\AlgoRequires{Data is on a regular grid that observes periodic boundary condition.}
+
+\label{Algo:VPFFT}
+\begin{algorithmic}[1]
+
+\STATE $n \leftarrow 0$                                \ALIGNEDCOMMENT{iterative variables used here for algorithmic description }
+\STATE $\tilde{\epsilon}^{[n]}(\vec{x}) \leftarrow 0 $            \ALIGNEDCOMMENT{Initial strain rate deviation is zero}
+
+\STATE $\sigma^{[n]} (\vec{x}) \leftarrow$\textit{SolveConstitutiveEquation}$\left( \dot{E}, \mathrm{\textbf{Data}}, \mathrm{\textbf{PhasePropertyMap}}\right)$ 
+\STATE $L^0 \leftarrow$ \textit{InitializeReferenceMedium}( Data, PhasePropertyMap )  \COMMENT{Taylor approximation.}
+
+
+\STATE $\lambda^{[n]}(\vec{x}) \leftarrow \sigma^{[n]}(\vec{x})$  \ALIGNEDCOMMENT{ Assign the stress field as 
+the Lagrange Multiplier}
+\STATE $\tilde{\sigma}_{ij}( \vec{x} ) \leftarrow \sigma_{ij}(\vec{x}) - \Sigma_{ij}$
+\STATE $\phi_{ij}(\vec{x})$ $\leftarrow \tilde{\sigma}_{ij}( \vec{x} )$  
+
+
+\COMMENT{Finished Initialization, Iterative step to solve for convergence of the strain rate field.}
+
+%\STATE $\hat{ \Gamma}_{ijlk} \leftarrow$ ConstructGreensOperator( $L^0$, \textbf{Data}, $ \vec{\zeta} $ ) \ALIGNEDCOMMENT{$\vec{\zeta}$ is a point in the frequency space.}
+%\STATE $\hat{ \Gamma}^{sym}_{ijlk} \leftarrow$ Symmetrize( $\hat{ \Gamma}_{ijlk} $  )
+%\STATE $\hat{ \Gamma}^{asym}_{ijlk} \leftarrow$ Antisymmetrize( $\hat{ \Gamma}_{ijlk} $ )
+\REPEAT
+
+
+\STATE $\tilde{d}^{[n+1]}(\vec{x}) \leftarrow$ \textit{EvolveStrainRateDeviation}$\left( L^0, \phi^{[n]}(\vec{x}) \right)$ 
+
+\STATE $\sigma^{[n+1]}_{ij}(\vec{x}) \leftarrow$ \textit{SolveConstrainedConstitutiveEq}$\left( L^0, \lambda^{[n]}, \tilde{d}, \dot{E}, \mathrm{\textbf{Data}}, \mathrm{\textbf{PhasePropertyMap}}\right)$ 
+\STATE $\dot{\epsilon}^{[n+1]}(\vec{x}) \leftarrow$ \textit{ApplyConstitutiveEq}$\left( \sigma^{[n+1|}, \mathrm{\textbf{Data}}, \mathrm{\textbf{PhasePropertyMap}}\right)$
+
+\STATE $ \tilde{\dot{\epsilon}}^{[n+1]}(\vec{x}) \leftarrow  \dot{\epsilon}^{[n+1]}(\vec{x}) - \dot{E}$
+
+
+\STATE $\lambda_{ij}^{[n+1]}(\vec{x}) \leftarrow \lambda_{ij}^{[n]}( \vec{x}) + L^0_{ijkl} \left(\tilde{\dot{\epsilon}}_{kl}^{[n+1]}(\vec{x})  - \tilde{d}_{kl}^{[n+1]}(\vec{x}) \right) $
+%\textit{UpdateLagrangeMultiplier$\left( L^0,  \dot{\epsilon}^{[n+1]} - \dot{E}, \tilde{d}^{[n+1]} \right)$}
+
+
+%\STATE $\lambda^{[n+1]}(\vec{x}) \leftarrow$ \textit{UpdateLagrangeMultiplier$\left( L^0,  \dot{\epsilon}^{[n+1]} - \dot{E}, \tilde{d}^{[n+1]} \right)$}
+
+
+
+
+
+\STATE $\phi_{ij}(\vec{x}) \leftarrow \sigma_{ij}^{[n+1]} - L_{ijkl}^0 \left( \dot{\epsilon}^{[n+1]}_{kl} - \dot{E}_{kl} \right)$ 
+
+\STATE $\delta\epsilon^{[n+1]} = \dfrac{\left \langle | \dot{\epsilon}^{[n+1]}( \vec{x}) - \tilde{d}^{[n+1]}(\vec{x})| \right\rangle}
+                                                               {\dot{E}} $
+
+\STATE $\delta\sigma^{[n+1]} = \dfrac{\left \langle | \sigma^{[n+1]}( \vec{x}) - \lambda^{[n+1]}(\vec{x})| \right \rangle}
+                                                             {\dot{\Sigma}} $
+
+\UNTIL{ $\delta\sigma^{[n+1]} \leq 10^{-4} $ and $\delta\epsilon^{[n+1]} \leq 10^{-4}$}
+
+\STATE \textbf{Data} $\leftarrow$\textit{UpdateOrientation}(\textbf{Data}, \textbf{PhasePropertyMap})
+\STATE \textbf{Data} $\leftarrow$ \textit{UpdateHardeningCriterion}(\textbf{PhasePropertyMap})
+\end{algorithmic}
+\end{algorithm}
+
+
+
+
+
+\begin{algorithm}
+\caption{InitializeReferenceMedium}
+\AlgoInput{ \textbf{Data}, \textbf{PhasePropertyMap} }
+\label{Algo:InitRefMedium}
+\begin{algorithmic}
+\STATE $ M^{sec}_{ijlm}  \leftarrow \left \langle \sum_s \frac{m^s_{ij} m^s_{lm}}{\tau_c^s} \left( \frac{m^s_{i'j'} \sigma_{i'j'}}{\tau_c^s} \right)^{n-1}  \right \rangle_{\vec{x}} $ \ALIGNEDCOMMENT{Average is performed over all sample space}
+
+
+\LONGCOMMENT{$ m^s_{ij} $ are the Schmidt tensor for the $ s^{th} $ slip system in the \textbf{Sample} space. This is given by $ m = O^{-1}(\vec{q}\left( {\vec{x}} \right) ) m' O(\vec{q}\left( {\vec{x}} \right) )  $.  Here, $ O(\vec{q}\left( {\vec{x}} \right) ) $ is applying a rotation operation on $ m' $}
+
+
+
+\LONGCOMMENT{$ \tau^s_c $ is the critical resolved shear stress for the $ s^{th} $ slip system, which is a scalar.}
+\STATE $ L^0 \leftarrow (M^{sec})^{-1} $
+\RETURN $ L^0 $
+\end{algorithmic}
+\end{algorithm}
+
+
+\begin{algorithm}
+\caption{SolveConstitutiveEquation}
+\AlgoInput{ $ \dot{E} $, \textbf{Data}, \textbf{PhasePropertyMap} }
+
+\textbf{Desc : } $ \mathbf{\dot{E}} $ is the macroscopic, imposed strain rate on the sample.
+\label{Algo:SolConEq}
+\begin{algorithmic}
+\FORALL{ $\left \{  \vec{x_i}  \right \} $}
+\STATE $ \sigma_k(\vec{x}_i) \leftarrow $\textbf{FindRoot}$ \left(  \dot{E_j} - \sum_s m^s_j \left( \frac{|m^s_k \sigma_k (\vec{x}_i)|}{\tau_c^s} \right)^{n} sgn(m^s_k \sigma_k (\vec{x}_i))  =0 \right )$  \COMMENT{$ m^s_n $ is the Schmidt tensor in the sample frame.}
+\ENDFOR
+\RETURN $ \left \{ \sigma(\vec{x}_i) \right \}$
+\end{algorithmic}
+\end{algorithm}
+
+
+
+\begin{algorithm}
+\caption{ConstructGreensOperator}
+\AlgoInput{ $ L^0 $, \textbf{Data}, $ \vec{\zeta} $ }
+
+\textbf{Note: }  Calculate the Green's operator is calculated for a given frequency.
+
+\label{Algo:ConstructGreensOperator}
+\begin{algorithmic}
+%\STATE Let $ \{ \vec{x}\} = \left \{ \left(  \frac{n_x}{N_x} \Delta x, \frac{n_y}{N_y} \Delta x, \frac{n_z}{N_z} \Delta x\right ) \right \} $ be the grid points presenting the locations of the sample points.  The sample contains a total of $ N_x \times N_y \times N_z $ points.
+%
+%\STATE
+%\STATE $ \{ \vec{\zeta} \} \leftarrow \left\{ \left( \delta k_x n_x, \delta k_y n_y, \delta k_z n_z \right ) \right \}, n_x \in [1, N_x]$ 
+%
+%
+%\LONGCOMMENT{Both the real and reciprocal space grid can be fixed unless grid deformation is to be taken into account.  The frequency grid is selected ahead of time in the global initialization.}
+
+\STATE  $ A_{jk} \leftarrow \sum_{l = 0}^{2} \sum_{j = 0}^{2} \left( \zeta_l \zeta_j L^0_{ijkl} \right) $
+\STATE  $ A_{3j} \leftarrow \zeta_j $
+\STATE  $ A_{j3} \leftarrow \zeta_j $
+\STATE  $ A_{33} \leftarrow 0 $
+\STATE  $ \Gamma_{ijkl} \leftarrow - \zeta_j \zeta_l (A^{-1})_{ik} $ 
+\RETURN $ \Gamma_{ijkl} $
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}
+\caption{EvolveStrainRateDeviation}
+\AlgoInput{ $ L^0 $, $ \phi^{[n]}(\vec{x}) $}
+
+\label{Algo:EvolveStrainRateDeviation}
+\begin{algorithmic}
+\STATE $ \{ \vec{\zeta} \} \leftarrow \left\{ \left( \delta k_x n_x, \delta k_y n_y, \delta k_z n_z \right ) \right \}, n_x \in [0, N_x-1]$ 
+
+
+\LONGCOMMENT{Both the real and reciprocal space grid can be fixed unless grid deformation is to be taken into account.  The frequency grid is selected ahead of time in the global initialization.}
+% \STATE $\tilde{d}^{[n+1]}(\vec{x}) \leftarrow$ \textit{EvolveStrainRateDeviation}$\left( \hat{\Gamma}^{sym},  \phi^{[n]}(\vec{x}) \right)$ 
+\FORALL{$ \vec{\zeta}_i $}
+\IF{$ |\vec{\zeta}_i| > 0 $}
+\STATE $\hat{\phi}^{[n]}( \zeta_i) \leftarrow $ \textbf{FFT}($ \phi^{[n]}( \vec{x}_i ) $)
+\STATE $ \hat{ \Gamma}_{ijkl}  \leftarrow$ \textbf{ConstructGreensOperator}($ L^0, \vec{\zeta}_i $)
+\STATE $ \hat{ \Gamma}_{ijkl}^{sym} \leftarrow $ \textbf{Symmetrize}($ \hat{ \Gamma}_{ijkl}   $)
+\STATE $ \hat{\tilde{d}}^{[n+1]}_{ij}(\vec{\zeta}_i) \leftarrow - \hat{ \Gamma}_{ijkl} ^{sym} \hat{\phi}^{[n]}_{kl}(\vec{\zeta}_i) $
+\ELSE
+\STATE $ \hat{\tilde{d}}^{[n+1]}_{ij}(\vec{\zeta}_i) \leftarrow 0$
+\ENDIF
+\ENDFOR
+\RETURN \textbf{FFT}$ ^{-1} $($\hat{\tilde{d}}^{[n+1]}_{ij} $)
+\end{algorithmic}
+\end{algorithm}
+
+
+
+
+\begin{algorithm}
+\caption{SolveConstrainedConstitutiveEq}
+\AlgoInput{ $L^0, \lambda^{[n]}, \tilde{d}, \dot{E}$, \textbf{Data}, \textbf{PhasePropertyMap} }
+
+\label{Algo:ConstrainedConEq}
+\begin{algorithmic}
+
+\FORALL{ $ \{ \vec{x} \} $}
+\STATE $ \alpha_{lm} \leftarrow L^0_{lmij} \left( \dot{E}_{ij} + \tilde{d}_{ij}^{[n+1]}(\vec{x}) \right) $
+\STATE $ \beta_{lm} \leftarrow  \dot{\gamma}_0 L^0_{lmij} 
+\sum_s m_{ij}^s(\vec{x}) \left( \dfrac{m^s_{ij}(\vec{x}) \sigma^{[n+1]}_{ij} (\vec{x})}{\tau_c^s(\vec{x})} \right)^{n_l} \times sgn \left( m^s_{ij}(\vec{x}) \sigma^{[n+1]}_{ij} (\vec{x}) \right)$ 
+
+\LONGCOMMENT{$ m^s_{ij} $ is the Schmidt tensor in the sample frame for each point $ \vec{x} $.}
+
+
+\STATE	$ \sigma^{[n+1]}_{lm}(\vec{x}) \leftarrow $\textbf{FindRoot}$ \left(  \sigma_{lm}^{[n+1]}(\vec{x}) + \beta_{lm}( \sigma^{[n+1]}, \vec{x}) - \lambda_{lm}^{[n]}( \vec{x}) - \alpha_{lm}(\vec{x})=0 \right )$ 
+\ENDFOR
+\RETURN $ \sigma^{[n+1]} $
+\end{algorithmic}
+\end{algorithm}
+
+
+
+
+
+\begin{algorithm}
+\caption{ApplyConstitutiveEquation}
+\AlgoInput{ $\sigma^{[n+1]}$, \textbf{Data}, \textbf{PhasePropertyMap} }
+
+\label{Algo:ApplyConstitutiveEquation}
+\begin{algorithmic}
+
+\FORALL{ $ \{ \vec{x} \} $}
+
+\STATE $ \dot{\epsilon}_{ij}^{[n+1]}(\vec{x}) \leftarrow  
+\dot{\gamma}_0\sum_s m_{ij}^s(\vec{x}) \left( \dfrac{m^s_{ij}(\vec{x}) \sigma^{[n+1]}_{ij} (\vec{x})}{\tau_c^s(\vec{x})} \right)^{n_l} \times sgn \left( m^s_{ij}(\vec{x}) \sigma^{[n+1]}_{ij} (\vec{x}) \right)$ 
+
+\LONGCOMMENT{$ m^s_{ij} $ is the Schmidt tensor in the sample frame for each point $ \vec{x} $.}
+
+\ENDFOR
+\RETURN $ \dot{\epsilon}^{[n+1]} $
+\end{algorithmic}
+\end{algorithm}
+
+%
+%
+%\begin{algorithm}
+%\caption{UpdateOrientation}
+%\AlgoInput{ $ L^0 $, $ \phi^{[n+1]}(\vec{x})$, $\sigma^{[n+1]}(\vec{x}) $, $ \Delta t $, \textbf{Data}, \textbf{PhasePropertyMap}}
+%
+%\label{Algo:EvolveStrainRateDeviation}
+%\begin{algorithmic}
+%\STATE $ \{ \vec{\zeta} \} \leftarrow \left\{ \left( \delta k_x n_x, \delta k_y n_y, \delta k_z n_z \right ) \right \}, n_x \in [0, N_x-1]$ 
+%
+%
+%\LONGCOMMENT{Both the real and reciprocal space grid can be fixed unless grid deformation is to be taken into account.  The frequency grid is selected ahead of time in the global initialization.}
+%% \STATE $\tilde{d}^{[n+1]}(\vec{x}) \leftarrow$ \textit{EvolveStrainRateDeviation}$\left( \hat{\Gamma}^{sym},  \phi^{[n]}(\vec{x}) \right)$ 
+%\FORALL{$ \vec{\zeta}_i $}
+%\IF{$ |\vec{\zeta}_i| > 0 $}
+%\STATE $\hat{\phi}^{[n]}( \zeta_i) \leftarrow $ \textbf{FFT}($ \phi^{[n]}( \vec{x}_i ) $)
+%\STATE $ \hat{ \Gamma}_{ijkl}  \leftarrow$ \textbf{ConstructGreensOperator}($ L^0, \vec{\zeta}_i $)
+%\STATE $ \hat{ \Gamma}_{ijkl}^{asym} \leftarrow $ \textbf{AntiSymmetrize}($ \hat{ \Gamma}_{ijkl}   $)
+%\STATE $ \hat{\tilde{\dot{\omega}}}^{[n+1]}_{ij}(\vec{\zeta}_i) \leftarrow - \hat{ \Gamma}_{ijkl} ^{asym} \hat{\phi}^{[n+1]}_{kl}(\vec{\zeta}_i) $
+%\ELSE
+%\STATE $ \hat{\tilde{\dot{\omega}}}^{[n+1]}_{ij}(\vec{\zeta}_i) \leftarrow 0$
+%\ENDIF
+%\ENDFOR
+%
+%$\tilde{\dot{\omega}}_{ij}^{[n+1]}(\vec{x}) \leftarrow $ \textbf{FFT}$ ^{-1} $($\hat{\tilde{\dot{\omega}}}^{[n+1]}_{ij} $)
+%\end{algorithmic}
+%\end{algorithm}
+
+
+
+%
+%%-------------------------
+\end{document}
+%%-------------------------
+%

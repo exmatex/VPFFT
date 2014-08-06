@@ -1,0 +1,119 @@
+%LaTeX
+%\documentclass[twoside]{article}
+\documentclass[11pt]{article}
+%This makes the margins little smaller than the default
+%\usepackage{fullpage}
+%fullpage is not installed on andrew, so we'll just use these lines.
+\oddsidemargin0cm
+\topmargin-0.5cm     %I recommend adding these three lines to increase the 
+\textwidth16.5cm   %amount of usable space on the page (and save trees)U
+\textheight20.5cm  
+
+\usepackage{eqparbox}
+
+\usepackage{natbib}
+
+%if you need more complicated math stuff, you should use the next line
+\usepackage{amsmath}
+%This next line defines a variety of special math symbols which you
+%may need
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{algorithmic}
+\usepackage{algorithm}
+\usepackage{psfrag}
+%This next line (when uncommented) allow you to use encapsulated
+%postscript files for figures in your document
+\usepackage{epsfig}
+\usepackage{subfigure}
+%plain makes sure that we have page numbers
+\pagestyle{plain}
+%
+%
+%
+\title{
+  Proxy Application:  Full Field Viscoplasticity Simulation via Fast Fourier Transform
+}
+\author{
+  Frankie Li
+}
+\date{
+  \today
+     }
+
+%%This defines a new command \questionhead which takes one argument and
+%%prints out Question #. with some space.
+\newcommand{\myTitle}[1]
+  {\bigskip\bigskip
+   \noindent{\LARGE\bf #1}
+   \bigskip}
+   
+\floatname{algorithm}{Procedure}
+\renewcommand{\algorithmicrequire}{\textbf{Input: }}
+\renewcommand{\algorithmicensure}{\textbf{Output: }}
+\newcommand{\AlgoInput}{\textbf{Input: }}
+\newcommand{\AlgoDesc}{\textbf{Description: }}
+\newcommand{\AlgoOutput}{\textbf{Output: }}
+\newcommand{\AlgoRequires}{\textbf{Requires: }}
+\newcommand{\tab}{\hspace*{2em}}
+\newcommand{\RefFig}[1]{Fig. \ref{#1}}
+\newcommand{\RefEq}[1] {Eq. (\ref{#1})}
+\newcommand{\RefSec}[1]{Sec. \ref{#1}}
+\newcommand{\RefAlgo}[1]{Algo. \ref{#1}}
+\renewcommand{\algorithmiccomment}[1]{{\# #1}}
+\newcommand\ALIGNEDCOMMENT[1]{\hfill\eqparbox{COMMENT}{\# #1}}
+\newcommand\LONGCOMMENT[1]{%
+  \hfill\#\ \begin{minipage}[t]{\eqboxwidth{COMMENT}}#1\strut\end{minipage}%
+}
+%
+%-----------------------------------
+\begin{document}
+%-----------------------------------
+ 
+\newcommand{\captionfonts}{\slshape}
+
+\makeatletter  % Allow the use of @ in command names
+\long\def\@makecaption#1#2{%
+  \vskip\abovecaptionskip
+  \sbox\@tempboxa{{\captionfonts #1: #2}}%
+  \ifdim \wd\@tempboxa >\hsize
+    {\captionfonts #1: #2\par}
+  \else
+    \hbox to\hsize{\hfil\box\@tempboxa\hfil}%
+  \fi
+  \vskip\belowcaptionskip}
+\makeatother   % Cancel the effect of \makeatletter
+ 
+ Typical materials, such as most metals, are inhomogeneous in its response to mechanical stimuli. This anisotropy comes from the fact that most materials are polycrystalline, i.e., a single continuous sample that is composed of many smaller crystals, or grains, of different crystallographic orientations. Because material response for a single grain is directionally dependent, grains with different orientations in a polycrystal contribute to the macroscopic behavior in different ways. Conversely, application of macroscopic body force would also result in different reactions from grains of varying orientations within the same sample.  Finally, boundary conditions and neighborhood information also play a crucial role in both local and global material response.  This suggests that samples with similar orientation distribution do not necessarily behave in exactly the same way.  The goal of predicting the mechanical behavior of a material must then take into account all of the aforementioned complications.
+  
+The requirement of local resolution implies that full-field simulations are often the only way to accurately predict detailed material response, especially in cases of damage initiation. VPFFT (viscoplastic Fast Fourier Transform) \cite{Lebensohn2001} is one such full-field simulation method designed to address the problem of a polycrystalline sample undergoing plastic deformation.  In contrast to mean-field methods, full-field methods solve the crystal constitutive model \RefEq{eq:ViscoplasticityModel} at each material point.  Here, the strain rate, $\dot{\epsilon}_{ij}$ is related to the deviatoric stress state of the system, $\sigma'$ by a nonlinear relationship that depends on the slip systems of the local crystal.  Detail behaviors captured in these simulations can be compared directly with results from state-of-the-art imaging methods \cite{Lebensohn_2008}.  
+
+
+\begin{eqnarray}
+\dot{ \epsilon }_{ij} \left( \vec{x} \right) = \dot{ \gamma }_0 \sum_{k} m_{ij}^{(k)}( \vec{x}) 
+\left(
+\frac{|m^{(k)}_{\alpha \beta }(\vec{x}) \sigma_{\alpha \beta} '(\vec{x}) |}{\tau^{(k)}(\vec{x}) }
+ \right )^n
+sgn \left( m^{(k)}_{\alpha \beta}(\vec{x}) \sigma'(\vec{x})_{\alpha \beta} \right).
+\label{eq:ViscoplasticityModel}
+\end{eqnarray}
+
+
+In contrast to other full-field techniques such as finite element method, VPFFT is an attractive alternative because of its significantly reduced number of degrees of freedom, which enables simulations of large microstructures that are otherwise prohibitively expensive.  Using VPFFT, simulations across four orders of magnitude in length scale  (typically from microns to millimetre) can easily be performed with a modest computing cluster.  While information at the molecular and atomic scale are not explicitly captured, phenomenological models are used to follow their mesoscopic manifestation in the form of the tuning parameters in the crystal plasticity model.  For example, dislocation dynamics may be used to inform the hardening laws, which effects the critical resolved sheer stress seen as $\tau^{(k)}$ in \RefEq{eq:ViscoplasticityModel}.
+
+
+Simulation of microstructure evolution in VPFFT is decomposed into two distinct sub-problems.  First, the strain and lattice rotation rates are computed.  Specifically, velocity for each sample point is solved given its defined crystallographic orientation and boundary condition imposed by equilibrium and incompressibility.  This results in a system of partial differential equations that is coupled with the viscoplasticity model.  The solution of which can be found iteratively with the use of the Green’s function method \cite{Moulinec199869}.  The velocity field is solved at each of the iterations, and its corresponding stress field is obtained from the viscoplasticity model.  This is repeated until both the stress the velocity field converge.  As with most spectral methods, the solution is computed in the Fourier space to avoid the costly convolution integrals in the sample space.  This comes at a cost of the use of Fast Fourier Transform for each iteration step.
+
+
+While currently VPFFT is implemented in FORTRAN 90 with MPI and FFTW, a proxy application is being developed for both Matlab and C++.  The Matlab version, combined with a rigorous algorithm specification, will define a reference implementation of the the VPFFT algorithm.  The C++ version, on the other hand, will be a modular implementation to allow interchanging of individual computational kernels for performance tuning.  For example, the FFT computation can take advantage of GPGPU (OpenCL, Cuda).
+
+
+\bibliographystyle{plain}
+\bibliography{FFT.Spec}
+
+
+%%-------------------------
+\end{document}
+%%-------------------------
+
+
