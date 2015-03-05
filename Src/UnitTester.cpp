@@ -1,6 +1,8 @@
 #include "UnitTester.h"
 #include <fstream>
 #include <limits>
+#include "Config.h"
+
 
 namespace VPFFT
 {
@@ -108,6 +110,62 @@ namespace VPFFT
       Grid.UpdateSchmidtTensors();
     }
 
+    //----------------------------------------------------------------------------------
+    //  WriteRandomMaterial
+    //----------------------------------------------------------------------------------
+    void WriteRandomMaterial ( VPFFT::LinearAlgebra::SMatrix3x3 * OrientList,
+			       VPFFT::LinearAlgebra::EigenRep * Stress,
+			       int NumX, int NumY, int NumZ,
+			       const VPFFT::DataStructures::MaterialGrid & Grid,
+			       const std::string & Filename )
+    {
+
+      std::ofstream os( Filename.c_str() );
+      
+      for( int i = 0; i < Grid.NumX(); i ++ )
+        for( int j = 0; j < Grid.NumY(); j ++ )
+          for( int k = 0; k < Grid.NumZ(); k ++ )
+          {
+            
+	    VPFFT::LinearAlgebra::SMatrix3x3 Orient = OrientList[ Grid.ToIndex( i, j, k ) ];
+	    
+	    for( int m = 0; m < 3; m ++ )
+	      for( int n = 0; n < 3; n ++ )
+		os << Orient.m[m][n] << " ";
+	    os << Stress[ Grid.ToIndex( i, j, k ) ] << std::endl; 
+	  }
+      os.close();
+    }
+
+    //----------------------------------------------------------------------------------
+    //  ReadRandomMaterial
+    //----------------------------------------------------------------------------------
+    void ReadRandomMaterial ( VPFFT::LinearAlgebra::SMatrix3x3 * OrientList,
+			      VPFFT::LinearAlgebra::EigenRep * Stress,
+			      int NumX, int NumY, int NumZ,
+			      const VPFFT::DataStructures::MaterialGrid & Grid,
+			      const std::string & Filename )
+    {
+      
+      std::ifstream is( Filename.c_str() );
+      
+      for( int i = 0; i < Grid.NumX(); i ++ )
+        for( int j = 0; j < Grid.NumY(); j ++ )
+          for( int k = 0; k < Grid.NumZ(); k ++ )
+          {
+	    VPFFT::LinearAlgebra::SMatrix3x3 & Orient = OrientList[ Grid.ToIndex(i, j, k ) ];
+	   
+	    for( int m = 0; m < 3; m ++ )
+	      for( int n = 0; n < 3; n ++ )
+		is >> std::skipws >> Orient.m[m][n];
+	    
+	    VPFFT::LinearAlgebra::EigenRep & S = Stress[ Grid.ToIndex( i, j, k ) ];
+	    for( int m = 0; m < 5; m ++ )
+	      is >> std::skipws >> S.m[ m ];
+	  }
+      is.close();
+    }
+    
     //----------------------------------------------------------------------------------
     //
     //  SetMaterialGrid
@@ -263,6 +321,63 @@ namespace VPFFT
 
     //----------------------------------------------------------------------------------
     //
+    //   OpenMP_VPFFT_Test
+    //
+    //----------------------------------------------------------------------------------
+    void OpenMP_VPFFT_Test( int argc, char ** argv )
+    {
+      
+      Utilities::ConfigFile ConfigFile;
+      
+      ConfigFile.Read( "TestInput.config" );
+      
+      using VPFFT::LinearAlgebra::EigenRep;
+      using VPFFT::LinearAlgebra::SMatrix5x5;
+      using VPFFT::LinearAlgebra::SMatrix3x3;
+  
+      VPFFT::FCC_CrystalTest::FCC_SchmidtBasis FCC_Schmidt = VPFFT::FCC_CrystalTest::FCC_SchmidtBasis::Get();
+
+      
+      std::cout << "Begin Test --------- " << std::endl;
+      VPFFT::DataStructures::MaterialGrid SampleGrid( 32, 32, 32 );
+      
+      
+      //VPFFT::DataStructures::MaterialGrid SampleGrid( 128, 128, 128 );
+      
+      
+      //      std::string Filename = "TXFFT";
+      //ReadRicardoData( Filename, 64, 64, 64, SampleGrid );
+      SetMaterialGrid( SampleGrid );
+      VPFFT::LinearAlgebra::SMatrix3x3 StrainRateM;
+      StrainRateM.SetZero();
+      StrainRateM.m[2][2] = 1;
+      StrainRateM.m[1][1] = -0.5;
+      StrainRateM.m[0][0] = -0.5;
+
+      SampleGrid.SetVoxelLength( 1, 1, 1 );
+      std::cout << "Input Strain Rate  " << std::endl;
+      std::cout << StrainRateM << std::endl;
+      std::cout << "|| ===============================" << std::endl;
+      EigenRep MacroscopicStrain( StrainRateM );
+      std::cout << "Macroscopic Strain " << MacroscopicStrain << std::endl;
+
+      //   exit(0);
+      //SampleGrid.RunSingleStrainStep( MacroscopicStrain, 50, 0.01, 1e-5);
+      //     SampleGrid.RunVPFFT( MacroscopicStrain, 50, 4, 0.01, 1e-5);
+      SampleGrid.RunVPFFT( MacroscopicStrain, 100, 100, 0.03, 1e-5);
+      //SampleGrid.RunVPFFT( MacroscopicStrain, 50, 100, 2, 1e-5);
+      
+      std::ofstream outfile("TestFile.dx");
+      PrintGrid( outfile, SampleGrid );
+      outfile.close();
+            
+      std::cout << "|| ===============================" << std::endl;
+
+      
+    }
+      
+    //----------------------------------------------------------------------------------
+    //
     //   MPI_VPFFT_Test
     //
     //----------------------------------------------------------------------------------
@@ -305,14 +420,14 @@ namespace VPFFT
         //        SetMaterialGrid( OrientList, StressList, NumX, NumY, NumZ, SampleGrid );
         std::cout << "Before setting random grid " << std::endl;
         SetRandomMaterialGrid( OrientList, StressList, NumX, NumY, NumZ,
-                                SampleGrid,
-                                NumDomains, RandSeed );
+			       SampleGrid,
+			       NumDomains, RandSeed );
 
-        SampleGrid.SendData( OrientList, StressList );  
+        SampleGrid.SendDataAndInitialize( OrientList, StressList );  
       }
       else
       {
-        SampleGrid.RecvData();
+        SampleGrid.RecvDataAndInitialize();
       }
 
       //  StressList and OrientList probably could be deleted by this point from rank 0....

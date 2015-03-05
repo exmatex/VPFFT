@@ -82,13 +82,13 @@ namespace VPFFT
       //   Distribute the initial values as specified by Orientations and Stress
       //   to all of the N processors.
       //----------------------------
-      void SendData( SMatrix3x3 * Orientations,
-                           EigenRep * Stress );
+      void SendDataAndInitialize( SMatrix3x3 * Orientations,
+				  EigenRep * Stress );
 
       //----------------------------
       //  All clients must recv data.
       //----------------------------
-      void RecvData( );
+      void RecvDataAndInitialize( );
       
       
       //----------------------------

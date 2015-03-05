@@ -102,7 +102,7 @@ namespace VPFFT
     //--------------------------------------------------------------------------------
     //  UpdateSchmidtTensors
     //
-    //
+    //  Add OpenMP in this for one of the branches
     //--------------------------------------------------------------------------------
     void  MaterialGrid::UpdateSchmidtTensors()
     {
@@ -148,6 +148,7 @@ namespace VPFFT
 
     //--------------------------------------------------------------------------------
     //  InitializeComputation
+    //   Add open mp parallel
     //--------------------------------------------------------------------------------
     void MaterialGrid::InitializeComputation( const EigenRep & MacroscopicStrainRate )
     {
@@ -421,8 +422,8 @@ namespace VPFFT
     //   Distribute the initial values as specified by Orientations and Stress
     //   to all of the N processors.
     //--------------------------------------------------------------------------------
-    void MaterialGrid::SendData( SMatrix3x3 * Orientations,
-                                 EigenRep  * Stress )
+    void MaterialGrid::SendDataAndInitialize( SMatrix3x3 * Orientations,
+					      EigenRep  * Stress )
     {
       RUNTIME_ASSERT( Orientations != NULL, "Orientation array not initialized");
       RUNTIME_ASSERT( Stress != NULL,       "Stress array not initialized");
@@ -450,15 +451,9 @@ namespace VPFFT
       memcpy( static_cast< void* >(   StressField ),
               static_cast< void* >( & Stress[DimXLocalStart] ),
               sizeof( EigenRep ) * DimXLocal * DimYZ );
-
-      //-------------  DEBUG
-      std::cout << "------------" << std::endl;
-      std::cout << OrientationField[ DimXLocal * DimYZ - 1 ] << std::endl;
-      std::cout << "------------" << std::endl;
-      std::cout << "------------" << std::endl;
-      std::cout << StressField[ DimXLocal * DimYZ - 1 ] << std::endl;
-      std::cout << "------------" << std::endl;
-      //-------------  END DEBUG
+      
+      UpdateSchmidtTensors();
+      //----------  End initialize self ---------- ---------------------------------------//
       
       std::queue<MPI_Request *> RequestQueue;
 
@@ -539,9 +534,12 @@ namespace VPFFT
     }
     
     //--------------------------------------------------------------------------------
-    //  RecvData
+    //  RecvDataAndInitialize()
+    //
+    //  1. Send the sizes of the local domains to root.
+    //  2. Recv data from root, initialize local grid
     //--------------------------------------------------------------------------------
-    void MaterialGrid::RecvData( )
+    void MaterialGrid::RecvDataAndInitialize()
     {
       int Rank, NumProc;
       MPI_Comm_rank( MPI_COMM_WORLD, & Rank );
@@ -576,6 +574,7 @@ namespace VPFFT
       MPI_Wait( &OrientRequest, & Status );
       MPI_Wait( &StressRequest, & Status );
       
+      UpdateSchmidtTensors();
     }
     
     //--------------------------------------------------------------------------------
