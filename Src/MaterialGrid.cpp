@@ -306,7 +306,6 @@ namespace VPFFT
       LocalCRSS.resize              ( NumElements );
       AccumulatedShear.resize       ( NumElements );
 
-
       using FCC_CrystalTest::FCC_SchmidtBasis;
       //-------------------------------------------------------
       //   Hardening parameters, DEBUG values, even for hardening matrix
