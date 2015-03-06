@@ -108,7 +108,122 @@ namespace VPFFT
       is.close();
       Grid.UpdateSchmidtTensors();
     }
+
+    //----------------------------------------------------------------------------------
+    //  WriteRandomMaterial
+    //----------------------------------------------------------------------------------
+    void WriteRandomMaterial ( VPFFT::LinearAlgebra::SMatrix3x3 * OrientList,
+			       VPFFT::LinearAlgebra::EigenRep * Stress,
+			       int NumX, int NumY, int NumZ,
+			       const VPFFT::DataStructures::MaterialGrid & Grid,
+			       const std::string & Filename )
+    {
+
+      std::ofstream os( Filename.c_str() );
+      
+      for( int i = 0; i < Grid.NumX(); i ++ )
+        for( int j = 0; j < Grid.NumY(); j ++ )
+          for( int k = 0; k < Grid.NumZ(); k ++ )
+          {
+            
+	    VPFFT::LinearAlgebra::SMatrix3x3 Orient = OrientList[ Grid.ToIndex( i, j, k ) ];
+	    
+	    for( int m = 0; m < 3; m ++ )
+	      for( int n = 0; n < 3; n ++ )
+		os << Orient.m[m][n] << " ";
+	    os << Stress[ Grid.ToIndex( i, j, k ) ] << std::endl; 
+	  }
+      os.close();
+    }
     
+    //----------------------------------------------------------------------------------
+    //  ReadRandomMaterial
+    //----------------------------------------------------------------------------------
+    void ReadRandomMaterial ( VPFFT::LinearAlgebra::SMatrix3x3 * OrientList,
+			      VPFFT::LinearAlgebra::EigenRep * Stress,
+			      int NumX, int NumY, int NumZ,
+			      const VPFFT::DataStructures::MaterialGrid & Grid,
+			      const std::string & Filename )
+    {
+      
+      std::ifstream is( Filename.c_str() );
+      
+      for( int i = 0; i < Grid.NumX(); i ++ )
+        for( int j = 0; j < Grid.NumY(); j ++ )
+          for( int k = 0; k < Grid.NumZ(); k ++ )
+          {
+	    VPFFT::LinearAlgebra::SMatrix3x3 & Orient = OrientList[ Grid.ToIndex(i, j, k ) ];
+	   
+	    for( int m = 0; m < 3; m ++ )
+	      for( int n = 0; n < 3; n ++ )
+		is >> std::skipws >> Orient.m[m][n];
+	    
+	    VPFFT::LinearAlgebra::EigenRep & S = Stress[ Grid.ToIndex( i, j, k ) ];
+	    for( int m = 0; m < 5; m ++ )
+	      is >> std::skipws >> S.m[ m ];
+	  }
+      is.close();
+    }
+    //----------------------------------------------------------------------------------
+    //
+    //  SetMaterialGrid
+    //   DEBUG
+    //----------------------------------------------------------------------------------
+    void SetRandomMaterialGrid( int NumX, int NumY, int NumZ,
+				VPFFT::DataStructures::MaterialGrid & Grid,
+                                int NumSeedPoints, unsigned int RandSeed)
+    {
+      srand( RandSeed );
+
+      // build seed points
+
+      std::vector< VPFFT::LinearAlgebra::SMatrix3x3 > RandOrientationList;
+      std::vector< VPFFT::LinearAlgebra::SVector3 >   CenterList;
+
+      for( int i = 0; i < NumSeedPoints; i ++ )
+      {
+        VPFFT::LinearAlgebra::SMatrix3x3 m;
+
+        m.BuildActiveEulerMatrix (  DEGREE_TO_RADIAN( rand() % 360 ),
+                                    DEGREE_TO_RADIAN( rand() % 180 ),
+                                    DEGREE_TO_RADIAN( rand() % 360 ) );  // this is not uniform sampling - just for debugging
+	
+        VPFFT::LinearAlgebra::SVector3 v;
+
+        v.Set( rand() % Grid.NumX(),
+               rand() % Grid.NumY(),
+               rand() % Grid.NumZ() );
+
+        RandOrientationList.push_back( m );
+        CenterList.push_back( v );
+      }
+      
+      VPFFT::LinearAlgebra::SMatrix3x3 Left, Right;
+      VPFFT::LinearAlgebra::EigenRep StressState( 0, 0, 0, 0, 0 );
+      
+      for( int i = 0; i < Grid.NumX(); i ++ )
+        for( int j = 0; j < Grid.NumY(); j ++ )
+          for( int k = 0; k < Grid.NumZ(); k ++ )
+          {
+            int MinIndex = 0;
+            float MinDist = std::numeric_limits<float>::max();
+            
+            VPFFT::LinearAlgebra::SVector3 CurLocation ( i, j, k );
+            for( int n = 0; n < NumSeedPoints; n ++ )
+            {
+              float Dist = (CurLocation - CenterList[n]).GetLength();
+              if( Dist < MinDist )
+              {
+                MinIndex = n;
+                MinDist  = Dist;
+              }
+            }
+	    Grid.Orientation( i, j, k ) = RandOrientationList[MinIndex];
+	    Grid.Stress     ( i, j, k ) = VPFFT::LinearAlgebra::EigenRep( 0, 0, 0, 0, 0 );   // this is only for debugging
+          }
+      Grid.UpdateSchmidtTensors();
+    }
+
     //----------------------------------------------------------------------------------
     //
     //   SimpleOpenMPTest()
@@ -169,10 +284,7 @@ namespace VPFFT
     {
       Utilities::ConfigFile InputFile;
       
-      
       InputFile.Read( ConfigFilename );
-      
-
       
       using VPFFT::LinearAlgebra::EigenRep;
       using VPFFT::LinearAlgebra::SMatrix5x5;
@@ -186,8 +298,15 @@ namespace VPFFT
 						      InputFile.NumY, 
 						      InputFile.NumZ,
 						      NumThreads );
+      const int NumDomains = 30;
+      const int RandSeed = 37;
+      SetRandomMaterialGrid( InputFile.NumX, 
+			     InputFile.NumY, 
+			     InputFile.NumZ,
+			     SampleGrid,
+			     NumDomains, RandSeed );
+      std::cout << "Finished grid generation " << std::endl;
       
-      SetMaterialGrid( SampleGrid );
       VPFFT::LinearAlgebra::SMatrix3x3 StrainRateM = InputFile.InputStrainRate;
 
 

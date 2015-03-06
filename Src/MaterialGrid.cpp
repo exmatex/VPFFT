@@ -110,7 +110,8 @@ namespace VPFFT
       const VPFFT
         ::FCC_CrystalTest
         ::FCC_SchmidtBasis & FCC_Schmidt = VPFFT::FCC_CrystalTest::FCC_SchmidtBasis::Get();
-
+      
+#pragma omp parallel for					
       for( int i = 0; i < LocalSchmidtTensor.size(); i ++ )
       {        
         SMatrix3x3 OrientationTranspose = OrientationField[i];
@@ -160,7 +161,8 @@ namespace VPFFT
                                                                       static_cast<Float>(1. / float(MinRateSensitivity) ) );
 
       ImposedMaxResolvedStress = std::max( static_cast<Float>(2.0), ImposedMaxResolvedStress );
-      
+
+#pragma omp parallel for                      
       for( int i = 0; i < DimX; i ++ )
       {
         for( int j = 0; j < DimY; j ++ )
@@ -218,6 +220,7 @@ namespace VPFFT
             
       M.SetZero();
       int NumDataPoints = static_cast<int>( LocalSchmidtTensor.size() );
+#pragma omp parallel for					
       for( int i = 0; i < LocalSchmidtTensor.size(); i ++ )
       {
         SMatrix5x5 M_Local;
@@ -874,6 +877,7 @@ namespace VPFFT
     {
       for( int i = 0; i < AccumulatedShear.size(); i ++ )
       {
+/*
         if( i % 250 == 0 )
         {
           std::cout << "Before Hardening ------------------- " << std::endl;
@@ -882,6 +886,7 @@ namespace VPFFT
             std::cout << LocalCRSS[i][n]   << " |>" << AccumulatedShear[i] << " <| ";
           std::cout << std::endl;
         }
+*/
         LocalCRSS[i] = Solvers::CalculateHardening( AccumulatedShear[i], TimeStep,
                                                     StressField[i], 
                                                     LocalSchmidtTensor[i],
@@ -890,7 +895,7 @@ namespace VPFFT
                                                     RateSensitivity,
                                                     HardeningMatrix,
                                                     Tau0, Tau1, Theta0, Theta1  );
-        
+/*        
         if( i % 250 == 0 )
         {
           std::cout << "After Hardening " << std::endl;
@@ -899,6 +904,7 @@ namespace VPFFT
             std::cout << LocalCRSS[i][n]  << " |>" << AccumulatedShear[i] << " <| ";
           std::cout << "============================="  << std::endl;
         }
+*/
       }
     }
     

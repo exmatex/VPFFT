@@ -33,7 +33,32 @@ namespace VPFFT
     
     void SetMaterialGrid( VPFFT::DataStructures::MaterialGrid & Grid);
 
+    //-----------------------------------------
+    //  GenerateRandomMicroStructure
+    //
+    //  Generate a random microstructure, then output
+    //  the result into a text file for future input.
+    //-----------------------------------------                                                                         
+    void WriteRandomMaterial( VPFFT::LinearAlgebra::SMatrix3x3 * OrientList,
+                              VPFFT::LinearAlgebra::EigenRep * Stress,
+                              int NumX, int NumY, int NumZ,
+                              const VPFFT::DataStructures::MaterialGrid & Grid,
+                              const std::string & Filename );
 
+    //-----------------------------------------
+    //  ReadRandomMaterial
+    //-----------------------------------------
+    void ReadRandomMaterial( VPFFT::LinearAlgebra::SMatrix3x3 * OrientList,
+			     VPFFT::LinearAlgebra::EigenRep * Stress,
+			     int NumX, int NumY, int NumZ,
+			     const VPFFT::DataStructures::MaterialGrid & Grid,
+			     const std::string & Filename );
+    
+
+
+    void SetRandomMaterialGrid( int NumX, int NumY, int NumZ,
+                                const VPFFT::DataStructures::MaterialGrid & Grid,
+                                int NumSeedPoints, unsigned int RandSeed);
     
   }
   
