@@ -1,0 +1,9 @@
+CMakeCache.txt
+CMakeLists.txt
+*~
+CMakeFiles
+Makefile
+*.o
+*.do
+VPFFT++
+cmake_install.cmake

@@ -4,22 +4,16 @@
 #include "LinearAlgebra.h"
 #include <vector>
 #include "BurgerVectorBasis.h"
-//#include "fftw3.h"
+#include "fftw3.h"
 #include <string>
 #include "Solvers.h"
 #include <omp.h>
-#include <fftw3-mpi.h>
-#include <queue>
+
 #ifdef _OPENMP
     #include <omp.h>
 #else
     #define omp_get_num_threads() 0
     #define omp_get_thread_num() 0
-#endif
-
-//--------- For MPI debug
-#ifndef VPFFT_MPI_TAG
-    #define VPFFT_MPI_TAG 2
 #endif
 
 namespace VPFFT
@@ -78,20 +72,6 @@ namespace VPFFT
       }
 
       //----------------------------
-      // ParallelInitialize
-      //   Distribute the initial values as specified by Orientations and Stress
-      //   to all of the N processors.
-      //----------------------------
-      void SendDataAndInitialize( SMatrix3x3 * Orientations,
-				  EigenRep * Stress );
-
-      //----------------------------
-      //  All clients must recv data.
-      //----------------------------
-      void RecvDataAndInitialize( );
-      
-      
-      //----------------------------
       //  SetVoxelLength
       //----------------------------
       void SetVoxelLength( Float _xLength, Float _yLength, Float _zLength )
@@ -100,7 +80,7 @@ namespace VPFFT
         YVoxelLength = _yLength;
         ZVoxelLength = _zLength;
       }
-
+      
       //----------------------------
       //  UpdateSchmidtTensors
       //
@@ -110,8 +90,8 @@ namespace VPFFT
       //          faster.
       //----------------------------
       void UpdateSchmidtTensors( );
-      
-      
+
+
       //----------------------------
       //  ToIndex
       //     A consistent way to convert x, y, z index to 1D index
@@ -121,6 +101,7 @@ namespace VPFFT
       inline int ToIndex( int x, int y, int z ) const
       {
         return x * DimYZ + y * DimZ + z;
+        //        return z* DimYZ + y* DimZ + x;
       }
 
       //----------------------------
@@ -192,14 +173,6 @@ namespace VPFFT
       void AddPolarizationField( int x, int y, int z, const EigenRep & s );
       
 
-      //-----------------------------------
-      //  InitializeData
-      //      Input data into MaterialGrid 
-      //
-      //-----------------------------------
-      void InitializeData( SMatrix3x3 * Orientations,
-                           EigenRep  * Stress  );
-      
       //----------------------------
       //  RunSingleStrainStep
       //
@@ -252,9 +225,6 @@ namespace VPFFT
       int DimZ;
       int DimYZ;
 
-      ptrdiff_t DimXLocal;      // Currently using "slap" decomposition for FFT.  DimX gets modified. 
-      ptrdiff_t DimXLocalStart; // the use of ptrdiff_t is to conform with fftw-mpi's spec
-      
       Float XVoxelLength;
       Float YVoxelLength;
       Float ZVoxelLength;
@@ -268,8 +238,8 @@ namespace VPFFT
       //-------------------------------------------------------
 
       vector< vector<Float> > LocalCRSS;
-      vector<Float>           GammaDotBase;    // reference rate for each slip systems
-      vector<int>             RateSensitivity; // rate sensitivity for each system
+      vector<Float> GammaDotBase;    // reference rate for each slip systems
+      vector<int> RateSensitivity; // rate sensitivity for each system
 
 
       //-------------------------------------------------------
@@ -283,16 +253,13 @@ namespace VPFFT
       //-------------------------------------------------------
 
       //-------------------------------------------------------
-      // vector< SMatrix3x3 >          OrientationField;
-      // vector< EigenRep >            StressField;
-      
-      SMatrix3x3 *                  OrientationField;
-      EigenRep   *                  StressField;
+      vector< SMatrix3x3 >          OrientationField;
+      vector< EigenRep >            StrainRateField;
+      vector< EigenRep >            StressField;
       vector< EigenRep >            LagrangeMultiplierField;
       vector< vector<EigenRep> >    LocalSchmidtTensor;
       vector< Float >               AccumulatedShear;
       
-
       //-----------------------------------
       //  WARNING!!!!!
       //  Ordering of the FFT vectors should depend
@@ -359,20 +326,6 @@ namespace VPFFT
         oRes(2) = DisplacementVariation( x, y, z, 2 )[0];
         oRes(3) = DisplacementVariation( x, y, z, 3 )[0];
         oRes(4) = DisplacementVariation( x, y, z, 4 )[0];
-        return oRes;
-      }
-
-            //-----------------------------------
-      //  DisplacementVariation
-      //-----------------------------------
-      inline EigenRep DisplacementVariation_Im( int x, int y, int z ) const
-      {
-        EigenRep oRes;
-        oRes(0) = DisplacementVariation( x, y, z, 0 )[1];
-        oRes(1) = DisplacementVariation( x, y, z, 1 )[1];
-        oRes(2) = DisplacementVariation( x, y, z, 2 )[1];
-        oRes(3) = DisplacementVariation( x, y, z, 3 )[1];
-        oRes(4) = DisplacementVariation( x, y, z, 4 )[1];
         return oRes;
       }
 

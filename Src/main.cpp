@@ -12,6 +12,6 @@
 int main( int argc, char ** argv)
 {
   
-  VPFFT::UnitTester::MPI_VPFFT_Test( argc, argv );
+  VPFFT::UnitTester::SimpleOpenMPTest();
   return 0;
 }

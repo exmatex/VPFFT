@@ -24,7 +24,7 @@ set( VPFFT_List  ${VPFFT_List} "Src/Solvers.cpp" )
 
 set( CMAKE_C_COMPILER "mpicc-openmpi-gcc46") 
 set( CMAKE_CXX_COMPILER "mpicxx-openmpi-gcc46" )
-
+set( CMAKE_CXX_FLAGS "-fopenmp")
 # This project is designed to be built outside the Insight source tree.
 PROJECT(VPFFT++)
 set( EIGEN_PATH "/Users/li31/LLNL/ExMatEx/VonnegutSvn/svn/proxyApps/VPFFT/trunk/ExtLib/eigen-eigen-6e7488e20373")
