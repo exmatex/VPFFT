@@ -279,7 +279,8 @@ namespace VPFFT
       //  FFTW OpenMP initialization
       //-------------------------------------------------------
       fftw_init_threads( );
-      fftw_plan_with_nthreads( 8 );
+      std::cout << "FFTW setup with " << NumThreads << " threads " << std::endl;
+      fftw_plan_with_nthreads( NumThreads );
       //-------------------------------------------------------
       //
       //               D E B U G
@@ -692,8 +693,10 @@ namespace VPFFT
       Float StrainRateErrorNorm = 0;
       Float StressErrorNorm     = 0;
       EigenRep TotalAveragedStress;
-      //-------------------- SETUP OpenMP
-      int NumThreads = 8;
+      
+//-------------------- SETUP OpenMP
+      //int NumThreads = 8;
+
       omp_set_num_threads( NumThreads );
       std::cout << "NumThreads " << NumThreads << std::endl;
       

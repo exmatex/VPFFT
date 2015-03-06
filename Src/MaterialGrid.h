@@ -61,12 +61,13 @@ namespace VPFFT
       MaterialGrid()
         : DimX( 0 ),
           DimY( 0 ),
-          DimZ( 0 ), bInitialized( false ) {}
+          DimZ( 0 ), NumThreads(1), bInitialized( false ) {}
     
-      MaterialGrid( int DimX_, int DimY_, int DimZ_ )
+      MaterialGrid( int DimX_, int DimY_, int DimZ_, int NumThreads_ = 1 )
         : DimX( DimX_ ),
           DimY( DimY_ ),
-          DimZ( DimZ_ )
+          DimZ( DimZ_ ),
+	  NumThreads( NumThreads_ )
       {
         InitializeMemory( DimX_, DimY_, DimZ_ );
       }
@@ -218,8 +219,17 @@ namespace VPFFT
       void PrintPolarization( const std::string & filename );
       void PrintLagrangeMultiplier( const std::string & filename );
       
-    private:
 
+      //----------------------------
+      // SetNumThreads();
+      //----------------------------
+      void SetNumThreads( int N )
+      {
+	NumThreads = N;
+      }
+    private:
+      
+      int NumThreads;
       int DimX;
       int DimY;
       int DimZ;

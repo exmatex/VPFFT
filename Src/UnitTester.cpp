@@ -1,5 +1,7 @@
 #include "UnitTester.h"
 #include <fstream>
+#include "Config.h"
+
 namespace VPFFT
 {
   namespace UnitTester
@@ -113,7 +115,7 @@ namespace VPFFT
     //      a hard coded test example
     //
     //----------------------------------------------------------------------------------
-    void SimpleOpienMPTest()
+    void SimpleOpenMPTest()
     {
       using VPFFT::LinearAlgebra::EigenRep;
       using VPFFT::LinearAlgebra::SMatrix5x5;
@@ -156,6 +158,61 @@ namespace VPFFT
       std::cout << "|| ===============================" << std::endl;
       
     }
+
+
+    //----------------------------------------------------------------------------------
+    // OpenMPTest
+    //    OpenMP test reads in a config file to run a VPFFT test
+    //
+    //----------------------------------------------------------------------------------
+    void OpenMPTest( const std::string & ConfigFilename, int NumThreads )
+    {
+      Utilities::ConfigFile InputFile;
+      
+      
+      InputFile.Read( ConfigFilename );
+      
+
+      
+      using VPFFT::LinearAlgebra::EigenRep;
+      using VPFFT::LinearAlgebra::SMatrix5x5;
+      using VPFFT::LinearAlgebra::SMatrix3x3;
+  
+      VPFFT::FCC_CrystalTest::FCC_SchmidtBasis FCC_Schmidt = VPFFT::FCC_CrystalTest::FCC_SchmidtBasis::Get();
+
+      
+      std::cout << "Begin Test --------- " << std::endl;
+      VPFFT::DataStructures::MaterialGrid SampleGrid( InputFile.NumX, 
+						      InputFile.NumY, 
+						      InputFile.NumZ,
+						      NumThreads );
+      
+      SetMaterialGrid( SampleGrid );
+      VPFFT::LinearAlgebra::SMatrix3x3 StrainRateM = InputFile.InputStrainRate;
+
+
+      SampleGrid.SetVoxelLength( 1, 1, 1);
+      std::cout << "Input Strain Rate  " << std::endl;
+      std::cout << StrainRateM << std::endl;
+      std::cout << "|| ===============================" << std::endl;
+      EigenRep MacroscopicStrain( StrainRateM );
+      std::cout << "Macroscopic Strain " << MacroscopicStrain << std::endl;
+      
+      SampleGrid.RunVPFFT( MacroscopicStrain, 
+			   InputFile.MaxNRIter, 
+			   InputFile.NumTimeIter,
+			   InputFile.TimeStep,
+			   InputFile.NRTolerence );
+      
+      std::ofstream outfile("TestFile.dx");
+      PrintGrid( outfile, SampleGrid );
+      outfile.close();
+            
+      std::cout << "|| ===============================" << std::endl;
+      
+    }
+
+    
 
   }
 }

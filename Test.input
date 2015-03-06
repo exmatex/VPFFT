@@ -1,0 +1,20 @@
+#  Input file for VPFFT
+#  Lines with '#' are ignored as comments
+#
+#  
+
+
+GridDimension    32 32 32
+InputStrainRate	 
+ 0.01  0  0
+ 0     0  0
+ 0     0  0
+
+
+MaxNRIter    100
+TimeStep     0.01
+NumTimeIter  1
+NRTolerence  0.0001
+RandomInit
+
+

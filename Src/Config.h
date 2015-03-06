@@ -67,8 +67,7 @@ namespace Utilities
     {
       if ( CurrentLine + NumLineContinuation >= vsTokens.size() )
         return false;
-      std::cout << "Check line continuation" << std::endl;
-
+      
       for( int d = 1; d <= NumLineContinuation; d ++ )
       {
         std::cout << d << std::endl;

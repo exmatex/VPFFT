@@ -25,6 +25,8 @@ namespace Utilities
       return false;
     }
     
+    std::cout << "Finished parsing config file " << std::endl;
+    
     if( pBuffer )
       delete[] pBuffer;
     
@@ -48,7 +50,7 @@ namespace Utilities
         "TimeStep",
         "NumTimeIter",
         "NRTolerence",
-        "TwoGrainInit",
+        "RandomInit",
         "FileInit",
 
         "CRSS",
@@ -67,7 +69,7 @@ namespace Utilities
       eTimeStep,
       eNumTimeIter,
       eNRTolerence,
-      eTwoGrainInit,
+      eRandomInit,
       eFileInit,
       
       eCRSS,
@@ -84,16 +86,22 @@ namespace Utilities
     
     bool *vInitializationCheck;
     bool *vRequirementCheck;
+    
     vInitializationCheck = new bool[eNumKeywords];   // a check list to see which variable is not initialized
     vRequirementCheck    = new bool[eNumKeywords];   // a check list to see which variable is not initialized
-
+    
     for( int i = 0; i < eNumKeywords; i ++ )
     {
       vInitializationCheck[i] = false;
       vRequirementCheck[i]    = true;
     }
     vRequirementCheck[eFileInit] = false;
-    vRequirementCheck[eTwoGrainInit] = false;
+    vRequirementCheck[eRandomInit] = false;
+    
+    vRequirementCheck[ eCRSS ] = false;
+    vRequirementCheck[ eGammaDotBase ] = false;
+    vRequirementCheck[ eRateSensitivity ] = false;
+
     
     
     for(Size_Type i = 0; i < vsTokens.size(); i ++)
@@ -167,7 +175,7 @@ namespace Utilities
           NRTolerence = atof( vsTokens[i][1].c_str() );
           break;
           
-        case eTwoGrainInit:
+        case eRandomInit:
           InitMethod = eInitTwoGrain;
           break;
           
@@ -234,7 +242,7 @@ namespace Utilities
       }
     }
     if( ! vInitializationCheck[eFileInit] &&
-        ! vInitializationCheck[eTwoGrainInit]  )
+        ! vInitializationCheck[eRandomInit]  )
     {
       std::cerr << "Initialization scheme (either FileInit or TwoGrain init) needs to be specified." << std::endl;
       Success = false;
@@ -258,6 +266,8 @@ namespace Utilities
     std::cout << "TimeStep "   << TimeStep << std::endl;
     std::cout << "InitMethod " << InitMethod << std::endl;
     
+
+    return Success;
   }
 
 

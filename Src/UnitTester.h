@@ -25,8 +25,16 @@ namespace VPFFT
     //  to make sure that the compilation is correct
     //-------------------------------------------
     void SimpleOpenMPTest();   
-
+    
+    //-------------------------------------------
+    //
+    //-------------------------------------------
+    void OpenMPTest( const std::string & ConfigFilename, int NumThreads );   
+    
     void SetMaterialGrid( VPFFT::DataStructures::MaterialGrid & Grid);
+
+
+    
   }
   
 }
